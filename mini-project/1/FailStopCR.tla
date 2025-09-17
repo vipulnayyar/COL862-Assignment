@@ -3,17 +3,30 @@
 
 EXTENDS CR, FiniteSets
 
-VARIABLE Flag, Current_Tail
+VARIABLE Flag, Current_Tail, Current_Head, srvNext, srvPrev, srvLive, LiveServerCount
 
+FailServers(failed_servers) ==
+    
+    /\ LiveServerCount' = LiveServerCount - Cardinality(failed_servers)
+    /\  \A server \in failed_servers:
+        /\ srvLive' = [srvLive EXCEPT ![server] = 0 ]
+        /\ Flag' = Flag + 1
+        /\  CASE (srvPrev[server] = 0) -> (
+                /\ Current_Head' = srvNext[server] 
+                /\ srvPrev' = [srvPrev EXCEPT ![ srvNext[server] ] = 0 ] 
+                /\ UNCHANGED <<reqs, srvReqs, srvReplied, resps, srvVals, srvNext, Current_Tail>>
+            )
+            [] (srvNext[server] = 0) -> (
+                /\ Current_Tail' = srvPrev[server] 
+                /\ srvNext' = [srvNext EXCEPT ![ srvPrev[server] ] = 0]
+                /\ UNCHANGED <<reqs, srvReqs, srvReplied, resps, srvVals, srvPrev, Current_Head>>
+            )
+            [] OTHER -> (
+                /\ srvPrev' = [srvPrev EXCEPT ![ srvNext[server] ] = srvPrev[server] ] 
+                /\ srvNext' = [srvNext EXCEPT ![ srvPrev[server] ] = srvNext[server]] 
+                /\ UNCHANGED <<reqs, srvReqs, srvReplied, resps, srvVals, LiveServerCount, Current_Head, Current_Tail>>
+            )
 
-
-FailAndShiftServerChainBack(failed_servers) == 
-    /\ srvVals' = [t \in (1..(Current_Tail-(Cardinality(failed_servers))) |-> IF t < server THEN srvVals[t] ELSE srvVals[t+1]]    
-    /\ srvReqs' = [t \in (1..Current_Tail-1) |-> IF t < server THEN srvReqs[t] ELSE srvReqs[t+1]] 
-    /\ srvReplied' = [t \in (1..Current_Tail-1) |-> IF t < server THEN srvReplied[t] ELSE srvReplied[t+1]]      
-    /\ Flag' = 1
-    /\ Current_Tail' = Current_Tail - 1
-    /\ UNCHANGED <<reqs, resps>>
 
 FailStopCRTypeOK == 
     /\ srvVals \in [(1..Current_Tail) -> VALS]
@@ -21,28 +34,35 @@ FailStopCRTypeOK ==
     /\ srvReplied \in [(1..Current_Tail) -> [r: SUBSET RID, w: SUBSET WID]]
     /\ resps \in Seq(Res)
     /\ reqs \subseteq Req
-    /\ Cardinality(DOMAIN srvVals) > 1
+    /\ srvNext \in [(1..Current_Tail) -> (0..Current_Tail)]
+    /\ srvPrev \in [(1..Current_Tail) -> (0..Current_Tail)]
+    /\ Flag < 1
+\*    /\ Cardinality({k \in (DOMAIN srvLive) : srvLive[k] = 1}) > 1
 
 FailStopCRInit == 
     /\ CRInit
     /\ Flag = 0
     /\ Current_Tail = TAIL
+    /\ Current_Head = HEAD
+    /\ srvNext = [s \in 1..Current_Tail |-> IF s < Current_Tail THEN s+1 ELSE 0]
+    /\ srvPrev = [s \in 1..Current_Tail |-> IF s > 1 THEN s-1 ELSE 0]
+    /\ srvLive = [s \in 1..Current_Tail |-> 1]
+    /\ LiveServerCount = Current_Tail
+
 
 FailStopCRNext == 
-    \/ \E failed_servers \in (SUBSET (DOMAIN srvVals)):
-            IF  Cardinality(failed_servers) < Current_Tail
+    /\  Flag = 0
+    /\  LiveServerCount > 1 
+    /\  FailServers({1,2})
+(* 
+    \E failed_servers \in SUBSET({k \in (DOMAIN srvLive) : srvLive[k] = 1}):
+          IF  Cardinality(failed_servers) < LiveServerCount
             THEN
-                    FailAndShiftServerChainBack(failed_servers) 
+                TRUE 
+               \* FailServers(failed_servers) 
             ELSE
-                UNCHANGED <<reqs, srvReqs, srvReplied, resps, srvVals, Current_Tail, Flag>>
-    \/ UNCHANGED <<reqs, srvReqs, srvReplied, resps, srvVals, Current_Tail, Flag>>
-
-(*
-    \/ 
-        /\ CRNext
-        /\  UNCHANGED <<FLAG>>
+                UNCHANGED <<reqs, srvReqs, srvReplied, resps, srvVals, Current_Tail, Current_Head, srvLive, Flag, LiveServerCount, srvNext, srvPrev>>
 *)
-    
 
 
 (*
@@ -51,6 +71,6 @@ FailStopCRNext ==
     /\ UNCHANGED <<reqs, srvReqs, srvReplied, resps, srvVals>>
 *)
 
-FailStopCRSpec == FailStopCRInit /\ [][FailStopCRNext]_<<srvReplied, srvVals, srvReqs, resps, reqs, Flag, Current_Tail>>
+FailStopCRSpec == FailStopCRInit /\ [][FailStopCRNext]_<<srvReplied, srvVals, srvReqs, resps, reqs, Flag, Current_Tail, Current_Head, LiveServerCount, srvLive, srvNext, srvPrev>>
 
 =============================================================================
