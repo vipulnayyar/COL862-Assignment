@@ -3,74 +3,92 @@
 
 EXTENDS CR, FiniteSets
 
-VARIABLE Flag, Current_Tail, Current_Head, srvNext, srvPrev, srvLive, LiveServerCount
+VARIABLE Flag, Current_Tail, removed_indices
 
-FailServers(failed_servers) ==
-    
-    /\ LiveServerCount' = LiveServerCount - Cardinality(failed_servers)
-    /\  \A server \in failed_servers:
-        /\ srvLive' = [srvLive EXCEPT ![server] = 0 ]
-        /\ Flag' = Flag + 1
-        /\  CASE (srvPrev[server] = 0) -> (
-                /\ Current_Head' = srvNext[server] 
-                /\ srvPrev' = [srvPrev EXCEPT ![ srvNext[server] ] = 0 ] 
-                /\ UNCHANGED <<reqs, srvReqs, srvReplied, resps, srvVals, srvNext, Current_Tail>>
-            )
-            [] (srvNext[server] = 0) -> (
-                /\ Current_Tail' = srvPrev[server] 
-                /\ srvNext' = [srvNext EXCEPT ![ srvPrev[server] ] = 0]
-                /\ UNCHANGED <<reqs, srvReqs, srvReplied, resps, srvVals, srvPrev, Current_Head>>
-            )
-            [] OTHER -> (
-                /\ srvPrev' = [srvPrev EXCEPT ![ srvNext[server] ] = srvPrev[server] ] 
-                /\ srvNext' = [srvNext EXCEPT ![ srvPrev[server] ] = srvNext[server]] 
-                /\ UNCHANGED <<reqs, srvReqs, srvReplied, resps, srvVals, LiveServerCount, Current_Head, Current_Tail>>
-            )
+FailServer(server_state, failed_servers) == 
+    [i \in 1..(Len(server_state) - Cardinality(failed_servers)) 
+        |->
+            LET 
+                validindexes == 
+                    [j \in 1..Len(server_state) 
+                        |-> 
+                            IF j \in failed_servers THEN 0 ELSE j]
 
+                filteredindexes == 
+                    SelectSeq(validindexes, LAMBDA x : x > 0)
+
+            IN 
+                server_state[filteredindexes[i]] ]
+        
 
 FailStopCRTypeOK == 
-    /\ srvVals \in [(1..Current_Tail) -> VALS]
-    /\ srvReqs \in [(1..Current_Tail) -> Seq(Req)]
-    /\ srvReplied \in [(1..Current_Tail) -> [r: SUBSET RID, w: SUBSET WID]]
+    /\ srvVals \in [(1..Len(srvVals)) -> VALS]
+    /\ srvReqs \in [(1..Len(srvReqs)) -> Seq(Req)]
+    /\ srvReplied \in [(1..Len(srvReplied)) -> [r: SUBSET RID, w: SUBSET WID]]
     /\ resps \in Seq(Res)
     /\ reqs \subseteq Req
-    /\ srvNext \in [(1..Current_Tail) -> (0..Current_Tail)]
-    /\ srvPrev \in [(1..Current_Tail) -> (0..Current_Tail)]
-    /\ Flag < 1
-\*    /\ Cardinality({k \in (DOMAIN srvLive) : srvLive[k] = 1}) > 1
+\*    /\ Flag < 3
+\*    /\ Len(resps) < 1
 
 FailStopCRInit == 
     /\ CRInit
     /\ Flag = 0
     /\ Current_Tail = TAIL
-    /\ Current_Head = HEAD
-    /\ srvNext = [s \in 1..Current_Tail |-> IF s < Current_Tail THEN s+1 ELSE 0]
-    /\ srvPrev = [s \in 1..Current_Tail |-> IF s > 1 THEN s-1 ELSE 0]
-    /\ srvLive = [s \in 1..Current_Tail |-> 1]
-    /\ LiveServerCount = Current_Tail
+    /\ removed_indices = {}
 
+
+FailureStep ==
+    /\ Flag' = Flag + 1
+    
+    /\ \E indices_to_remove \in SUBSET(1..Len(srvVals)):
+        /\ Cardinality(indices_to_remove) < Len(srvVals)
+        /\ removed_indices' = indices_to_remove
+        /\ srvVals' = FailServer(srvVals, indices_to_remove)
+        /\ srvReqs' = FailServer(srvReqs, indices_to_remove)
+        /\ srvReplied' = FailServer(srvReplied, indices_to_remove)
+        /\ Current_Tail' = Len(srvVals')
+
+
+
+ModifiedCRIssueRead(rid) ==
+    LET op == [id |-> rid] IN
+    /\ reqs' = reqs \cup {op}
+    /\ srvReqs' = [srvReqs EXCEPT ![Current_Tail] = Append(@, op)]
+    /\ UNCHANGED <<srvVals, srvReplied, resps>>
+
+ModifiedCRServerWrites(op, s) ==
+    /\ op.id \in WID
+    /\ op.id \notin srvReplied[s].w
+    /\ srvReplied' = [srvReplied EXCEPT ![s] = [@ EXCEPT !.w = @ \union {op.id}]]
+    /\ srvVals' = [srvVals EXCEPT ![s] = op.v]
+    /\ \/ /\ s+1 > Current_Tail 
+          /\ resps' = Append(resps, [id |-> op.id])
+          /\ srvReqs' = srvReqs
+       \/ /\ s+1 <= Current_Tail
+          /\ srvReqs' = [srvReqs  EXCEPT ![s+1] = Append(@, op)]
+          /\ resps' = resps
+    /\ UNCHANGED <<reqs>>
+
+ModifiedCRNext == 
+    \/ \E rid \in RID: ModifiedCRIssueRead(rid)
+          \/ \E wid \in WID: IssueWrite(wid)
+          \/ \E s \in (1..Len(srvVals)):
+            /\ Len(srvReqs[s]) > 0
+            /\ LET o == Head(srvReqs[s]) IN
+                \/ DropRead(o, s)
+                \/ DropWrite(o, s)
+                \/ ServerReads(o, s)
+                \/ ModifiedCRServerWrites(o, s)    
 
 FailStopCRNext == 
-    /\  Flag = 0
-    /\  LiveServerCount > 1 
-    /\  FailServers({1,2})
-(* 
-    \E failed_servers \in SUBSET({k \in (DOMAIN srvLive) : srvLive[k] = 1}):
-          IF  Cardinality(failed_servers) < LiveServerCount
-            THEN
-                TRUE 
-               \* FailServers(failed_servers) 
-            ELSE
-                UNCHANGED <<reqs, srvReqs, srvReplied, resps, srvVals, Current_Tail, Current_Head, srvLive, Flag, LiveServerCount, srvNext, srvPrev>>
-*)
+    \/ 
+        /\ FailureStep
+        /\ UNCHANGED <<reqs, resps>>
+    \/ 
+        /\ ModifiedCRNext
+        /\ UNCHANGED  <<Current_Tail, removed_indices, Flag>>
 
 
-(*
-FailStopCRNext == 
-    /\ FLAG' = 1
-    /\ UNCHANGED <<reqs, srvReqs, srvReplied, resps, srvVals>>
-*)
-
-FailStopCRSpec == FailStopCRInit /\ [][FailStopCRNext]_<<srvReplied, srvVals, srvReqs, resps, reqs, Flag, Current_Tail, Current_Head, LiveServerCount, srvLive, srvNext, srvPrev>>
+FailStopCRSpec == FailStopCRInit /\ [][FailStopCRNext]_<<srvReplied, srvVals, srvReqs, resps, reqs, Flag, Current_Tail, removed_indices>>
 
 =============================================================================
