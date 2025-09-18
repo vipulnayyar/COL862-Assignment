@@ -3,7 +3,9 @@
 
 EXTENDS CR, FiniteSets
 
-VARIABLE Flag, Current_Tail, removed_indices
+VARIABLE DEBUG_STEPS, Current_Tail, DEBUG_REMOVED_INDICES
+
+CONSTANT DEBUG_ENABLE
 
 FailServer(server_state, failed_servers) == 
     [i \in 1..(Len(server_state) - Cardinality(failed_servers)) 
@@ -19,7 +21,19 @@ FailServer(server_state, failed_servers) ==
 
             IN 
                 server_state[filteredindexes[i]] ]
-        
+
+
+DebugTypeOKConstraints ==
+    IF DEBUG_ENABLE = 1
+    THEN
+
+        /\ DEBUG_STEPS < 10
+\*        /\ Cardinality(reqs) < 2
+        /\ Len(resps) < 2
+        /\ Len(srvVals) = 4
+
+    ELSE
+        TRUE
 
 FailStopCRTypeOK == 
     /\ srvVals \in [(1..Len(srvVals)) -> VALS]
@@ -27,22 +41,22 @@ FailStopCRTypeOK ==
     /\ srvReplied \in [(1..Len(srvReplied)) -> [r: SUBSET RID, w: SUBSET WID]]
     /\ resps \in Seq(Res)
     /\ reqs \subseteq Req
-\*    /\ Flag < 3
-\*    /\ Len(resps) < 1
 
+    /\ DebugTypeOKConstraints
+
+DebugInit ==
+    /\ DEBUG_STEPS = 0
+    /\ DEBUG_REMOVED_INDICES = {}
+   
 FailStopCRInit == 
     /\ CRInit
-    /\ Flag = 0
     /\ Current_Tail = TAIL
-    /\ removed_indices = {}
+    /\ DebugInit
 
-
-FailureStep ==
-    /\ Flag' = Flag + 1
-    
-    /\ \E indices_to_remove \in SUBSET(1..Len(srvVals)):
-        /\ Cardinality(indices_to_remove) < Len(srvVals)
-        /\ removed_indices' = indices_to_remove
+FailureStep ==    
+    /\ \E indices_to_remove \in SUBSET(1..Current_Tail):
+        /\ Cardinality(indices_to_remove) < Current_Tail
+        /\ DEBUG_REMOVED_INDICES' = indices_to_remove
         /\ srvVals' = FailServer(srvVals, indices_to_remove)
         /\ srvReqs' = FailServer(srvReqs, indices_to_remove)
         /\ srvReplied' = FailServer(srvReplied, indices_to_remove)
@@ -70,25 +84,32 @@ ModifiedCRServerWrites(op, s) ==
     /\ UNCHANGED <<reqs>>
 
 ModifiedCRNext == 
-    \/ \E rid \in RID: ModifiedCRIssueRead(rid)
-          \/ \E wid \in WID: IssueWrite(wid)
-          \/ \E s \in (1..Len(srvVals)):
-            /\ Len(srvReqs[s]) > 0
-            /\ LET o == Head(srvReqs[s]) IN
-                \/ DropRead(o, s)
-                \/ DropWrite(o, s)
-                \/ ServerReads(o, s)
-                \/ ModifiedCRServerWrites(o, s)    
+\*    \/ \E rid \in RID: ModifiedCRIssueRead(rid)
+    \/ \E wid \in WID: IssueWrite(wid)
+    \/ \E s \in (1..Current_Tail):
+        /\ Len(srvReqs[s]) > 0
+        /\ LET o == Head(srvReqs[s]) IN
+            \/ DropRead(o, s)
+            \/ DropWrite(o, s)
+            \/ ServerReads(o, s)
+            \/ ModifiedCRServerWrites(o, s)    
 
 FailStopCRNext == 
-    \/ 
-        /\ FailureStep
-        /\ UNCHANGED <<reqs, resps>>
-    \/ 
-        /\ ModifiedCRNext
-        /\ UNCHANGED  <<Current_Tail, removed_indices, Flag>>
+    
+    /\  IF DEBUG_ENABLE = 1
+        THEN
+            DEBUG_STEPS' = DEBUG_STEPS + 1
+        ELSE
+            UNCHANGED <<DEBUG_STEPS, DEBUG_REMOVED_INDICES>>
+    /\
+        \/  
+            /\ FailureStep
+            /\ UNCHANGED <<reqs, resps>>
+        \/ 
+            /\ ModifiedCRNext
+            /\ UNCHANGED  <<Current_Tail, DEBUG_REMOVED_INDICES>>
 
 
-FailStopCRSpec == FailStopCRInit /\ [][FailStopCRNext]_<<srvReplied, srvVals, srvReqs, resps, reqs, Flag, Current_Tail, removed_indices>>
+FailStopCRSpec == FailStopCRInit /\ [][FailStopCRNext]_<<srvReplied, srvVals, srvReqs, resps, reqs, DEBUG_STEPS, Current_Tail, DEBUG_REMOVED_INDICES>>
 
 =============================================================================
