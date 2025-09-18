@@ -3,7 +3,7 @@
 
 EXTENDS CR, FiniteSets
 
-VARIABLE DEBUG_STEPS, Current_Tail, DEBUG_REMOVED_INDICES
+VARIABLE DEBUG_STEPS, Current_Tail, DEBUG_REMOVED_INDICES, srvHist
 
 CONSTANT DEBUG_ENABLE
 
@@ -23,6 +23,16 @@ FailServer(server_state, failed_servers) ==
                 server_state[filteredindexes[i]] ]
 
 
+\* Safety Property
+UpdatePropagationSafety ==
+    \A i \in (1..Current_Tail):
+        \A j \in (i+1..Current_Tail):
+            SubSeq(srvHist[i], 1, Len(srvHist[j])) = srvHist[j]
+
+
+\*InprocessRequestsSafety == 
+    
+
 DebugTypeOKConstraints ==
     IF DEBUG_ENABLE = 1
     THEN
@@ -41,7 +51,7 @@ FailStopCRTypeOK ==
     /\ srvReplied \in [(1..Len(srvReplied)) -> [r: SUBSET RID, w: SUBSET WID]]
     /\ resps \in Seq(Res)
     /\ reqs \subseteq Req
-
+    /\ UpdatePropagationSafety
     /\ DebugTypeOKConstraints
 
 DebugInit ==
@@ -51,6 +61,7 @@ DebugInit ==
 FailStopCRInit == 
     /\ CRInit
     /\ Current_Tail = TAIL
+    /\ srvHist = [s \in (1..Current_Tail) |-> <<>>]
     /\ DebugInit
 
 FailureStep ==    
@@ -74,6 +85,7 @@ ModifiedCRServerWrites(op, s) ==
     /\ op.id \in WID
     /\ op.id \notin srvReplied[s].w
     /\ srvReplied' = [srvReplied EXCEPT ![s] = [@ EXCEPT !.w = @ \union {op.id}]]
+    /\ srvHist' = [srvHist EXCEPT ![s] = Append(@, op)]
     /\ srvVals' = [srvVals EXCEPT ![s] = op.v]
     /\ \/ /\ s+1 > Current_Tail 
           /\ resps' = Append(resps, [id |-> op.id])
@@ -84,7 +96,7 @@ ModifiedCRServerWrites(op, s) ==
     /\ UNCHANGED <<reqs>>
 
 ModifiedCRNext == 
-\*    \/ \E rid \in RID: ModifiedCRIssueRead(rid)
+    \/ \E rid \in RID: ModifiedCRIssueRead(rid)
     \/ \E wid \in WID: IssueWrite(wid)
     \/ \E s \in (1..Current_Tail):
         /\ Len(srvReqs[s]) > 0
@@ -104,12 +116,12 @@ FailStopCRNext ==
     /\
         \/  
             /\ FailureStep
-            /\ UNCHANGED <<reqs, resps>>
+            /\ UNCHANGED <<reqs, resps, srvHist>>
         \/ 
             /\ ModifiedCRNext
-            /\ UNCHANGED  <<Current_Tail, DEBUG_REMOVED_INDICES>>
+            /\ UNCHANGED  <<Current_Tail>>
 
 
-FailStopCRSpec == FailStopCRInit /\ [][FailStopCRNext]_<<srvReplied, srvVals, srvReqs, resps, reqs, DEBUG_STEPS, Current_Tail, DEBUG_REMOVED_INDICES>>
+FailStopCRSpec == FailStopCRInit /\ [][FailStopCRNext]_<<srvReplied, srvVals, srvReqs, resps, reqs, DEBUG_STEPS, Current_Tail, DEBUG_REMOVED_INDICES, srvHist>>
 
 =============================================================================
