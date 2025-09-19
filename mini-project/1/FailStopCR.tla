@@ -9,7 +9,6 @@ CONSTANT DEBUG_ENABLE
 
 SequencetoSet(seq) == 
     {seq[i] : i \in DOMAIN seq}
-        
 
 RemoveElementsfromSequence(seq_to_remove_from, filter_seq) ==
     [i \in 1..Cardinality({j \in DOMAIN seq_to_remove_from : seq_to_remove_from[j] \notin  SequencetoSet(filter_seq)}) 
@@ -43,7 +42,7 @@ FailureRecovery(server_state, server_history, server_sent) ==
                         LET
 
                         CurrentSequenceCount == Len(server_history[i] \o RemoveElementsfromSequence(server_state[i], server_history[i]))
-                        PreviousSequenceCount == Len(server_history'[i-1] \o RemoveElementsfromSequence(server_sent[i-1], server_history[i-1]) )
+                        PreviousSequenceCount == Len(server_history'[i-1])
                         LengthofPrevSentToTransfer == PreviousSequenceCount - CurrentSequenceCount
 
                         IN
@@ -132,33 +131,8 @@ FailureStep ==
         /\ srvSent' = FailServer(srvSent, indices_to_remove)
         /\ srvAck' = FailServer(srvAck, indices_to_remove)
         /\ Current_Tail' = Len(srvVals')
-        /\  LET 
-                server_state == FailServer(srvReqs, indices_to_remove)
-                server_history == srvHist'
-                server_sent == srvSent'
-            
-            IN 
-                srvReqs' = [
-                                i \in 1..Len(server_state)
-                                    |->
-                                        IF i = 1
-                                        THEN
-                                            server_state[i]
-                                        ELSE
-                                            Append(server_state[i], 
-                                            
-                                                LET
-
-                                                CurrentSequenceCount == Len(server_history[i] \o RemoveElementsfromSequence(server_state[i], server_history[i]))
-                                                PreviousSequenceCount == Len(server_history'[i-1] \o RemoveElementsfromSequence(server_sent[i-1], server_history[i-1]) )
-                                                LengthofPrevSentToTransfer == PreviousSequenceCount - CurrentSequenceCount
-
-                                                IN
-                                                SubSeq(server_sent[i-1], Len(server_sent[i-1]) - LengthofPrevSentToTransfer + 1, LengthofPrevSentToTransfer  )
-                                            
-                                            )
-                            ]
-    
+\*        /\ srvReqs' = FailServer(srvReqs, indices_to_remove)
+        /\ srvReqs' = FailureRecovery(FailServer(srvReqs, indices_to_remove), FailServer(srvHist, indices_to_remove), FailServer(srvSent, indices_to_remove))
 
 
 
