@@ -37,18 +37,18 @@ FailureRecovery(server_state, server_history, server_sent) ==
                 THEN
                     server_state[i]
                 ELSE
-                    Append(server_state[i], 
+                    server_state[i] \o
                     
                         LET
 
                         CurrentSequenceCount == Len(server_history[i] \o RemoveElementsfromSequence(server_state[i], server_history[i]))
-                        PreviousSequenceCount == Len(server_history'[i-1])
+                        PreviousSequenceCount == Len(server_history[i-1])
                         LengthofPrevSentToTransfer == PreviousSequenceCount - CurrentSequenceCount
 
                         IN
                            SubSeq(server_sent[i-1], Len(server_sent[i-1]) - LengthofPrevSentToTransfer + 1, LengthofPrevSentToTransfer  )
                     
-                    )
+                    
     ]
     
 
