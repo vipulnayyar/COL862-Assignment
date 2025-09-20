@@ -13,7 +13,6 @@ VARIABLE
     srvMaxWriteSeqNumReceived, \* Max sequence number of the last update received by a server
     False_Tail
 
-
 CONSTANT DEBUG_ENABLE
 
 (* Helper function to create a set from elements of a Sequence *)
@@ -69,7 +68,7 @@ FailureRecovery(server_state, server_history, server_sent, server_max_write_seq_
     [
         i \in 1..Len(server_state)
             |->
-                IF i = 1
+                IF (i = 1 \/ i > Current_Tail)
                 THEN
                     server_state[i]
                 ELSE
@@ -126,31 +125,29 @@ UpdatePropagationSafety ==
 
 
 (* Debug Invariant only used when DEBUG_ENABLE constant is 1 in cfg. Does not affect actual FailStopCR spec*)
-DebugTypeOKInvariant ==
+DebugTypeOKInvariants ==
     IF DEBUG_ENABLE = 1
     THEN
         /\ STEPS >= 0
-\*        /\ STEPS < 50
-\*        /\  srvVals[Current_Tail] \notin DEBUG_NEWVALS
-\*        /\ Cardinality(srvReplied[Current_Tail].w) < 2
-\*        /\ srvVals[Current_Tail] = "v1"
-\*        /\ Cardinality(reqs) < 2
-\*        /\ Len(resps) < 2
-
+\*        /\ ~(
+\*            /\  False_Tail > Current_Tail 
+\*            /\ STEP_TAKEN = "FailureAndRecoveryStep"
+\*            ) 
+     
     ELSE
         TRUE
 
 (*Safety properties for all Variables*)
 AddFailStopCRTypeOK == 
-    /\ srvVals \in [(1..Current_Tail) -> VALS]
-    /\ srvReqs \in [(1..Current_Tail) -> Seq(Req)]
-    /\ srvReplied \in [(1..Current_Tail) -> [r: SUBSET RID, w: SUBSET WID]]
+    /\ srvVals \in [(1..False_Tail) -> VALS]
+    /\ srvReqs \in [(1..False_Tail) -> Seq(Req)]
+    /\ srvReplied \in [(1..False_Tail) -> [r: SUBSET RID, w: SUBSET WID]]
     /\ resps \in Seq(Res)
     /\ reqs \subseteq Req
-    /\ srvHist \in [(1..Current_Tail) -> Seq(WrReq)]
-    /\ srvMaxWriteSeqNumReceived \in [(1..Current_Tail) -> Nat]
-    /\ srvSent \in [(1..Current_Tail) -> Seq(WrReq)]
-    /\ srvAck \in [(1..Current_Tail) -> SUBSET WID]
+    /\ srvHist \in [(1..False_Tail) -> Seq(WrReq)]
+    /\ srvMaxWriteSeqNumReceived \in [(1..False_Tail) -> Nat]
+    /\ srvSent \in [(1..False_Tail) -> Seq(WrReq)]
+    /\ srvAck \in [(1..False_Tail) -> SUBSET WID]
     /\ REMOVED_INDICES \in SUBSET(Nat \ {0})
     /\ STEPS \in Nat
 
@@ -191,33 +188,37 @@ FailureAndRecoveryStep ==
 
 AddNewServertoChain(num_new_servers) ==
     /\ STEP_TAKEN' = "AddNewServertoChain"
-    /\ srvVals' = [ i \in Len(srvVals) + num_new_servers |-> IF i <= Len(srvVals) THEN srvVals[i] ELSE INITVAL]
-    /\ srvReqs' = [ i \in Len(srvReqs) + num_new_servers |-> IF i <= Len(srvReqs) THEN srvReqs[i] ELSE <<>>]
-    /\ srvReplied' = [ i \in Len(srvReplied) + num_new_servers |-> IF i <= Len(srvReplied) THEN srvReplied[i] ELSE [r |-> {}, w |-> {}]]
-    /\ srvReqs' = [ i \in Len(srvReqs) + num_new_servers |-> IF i <= Len(srvReqs) THEN srvReqs[i] ELSE <<>>]
-    /\ srvHist' = [ i \in Len(srvHist) + num_new_servers |-> IF i <= Len(srvHist) THEN srvHist[i] ELSE <<>>]
-    /\ srvSent' = [ i \in Len(srvSent) + num_new_servers |-> IF i <= Len(srvSent) THEN srvSent[i] ELSE <<>>]
-    /\ srvAck' = [ i \in Len(srvAck) + num_new_servers |-> IF i <= Len(srvAck) THEN srvAck[i] ELSE {}]
-    /\ srvMaxWriteSeqNumReceived' = [ i \in Len(srvMaxWriteSeqNumReceived) + num_new_servers |-> IF i <= Len(srvMaxWriteSeqNumReceived) THEN srvMaxWriteSeqNumReceived[i] ELSE 0]
+    /\ srvVals' = [ i \in 1..(Len(srvVals) + num_new_servers) |-> IF i <= Len(srvVals) THEN srvVals[i] ELSE INITVAL]
+    /\ srvReqs' = [ i \in 1..(Len(srvReqs) + num_new_servers) |-> IF i <= Len(srvReqs) THEN srvReqs[i] ELSE <<>>]
+    /\ srvReplied' = [ i \in 1..(Len(srvReplied) + num_new_servers) |-> IF i <= Len(srvReplied) THEN srvReplied[i] ELSE [r |-> {}, w |-> {}]]
+    /\ srvHist' = [ i \in 1..(Len(srvHist) + num_new_servers) |-> IF i <= Len(srvHist) THEN srvHist[i] ELSE <<>>]
+    /\ srvSent' = [ i \in 1..(Len(srvSent) + num_new_servers) |-> IF i <= Len(srvSent) THEN srvSent[i] ELSE <<>>]
+    /\ srvAck' = [ i \in 1..(Len(srvAck) + num_new_servers) |-> IF i <= Len(srvAck) THEN srvAck[i] ELSE {}]
+    /\ srvMaxWriteSeqNumReceived' = [ i \in 1..(Len(srvMaxWriteSeqNumReceived) + num_new_servers) |-> IF i <= Len(srvMaxWriteSeqNumReceived) THEN srvMaxWriteSeqNumReceived[i] ELSE 0]
+    /\ UNCHANGED  <<reqs, resps, REMOVED_INDICES, Current_Tail>>
     /\ False_Tail' = False_Tail + num_new_servers
     
 ShiftCurrentTailToNewServer ==
     /\  STEP_TAKEN' = "ShiftCurrentTailToNewServer"
-    /\  False_Tail > Current_Tail
+    /\  Current_Tail < Len(srvVals)
     /\  srvHist[Current_Tail] = srvHist[Current_Tail + 1] \o RemoveElementsfromSequence(srvSent[Current_Tail], srvHist[Current_Tail + 1]) \* Checking InProcess Requests Invariant which implies Tail can be shifted to new node.
-    /\ srvReqs' = [srvReqs EXCEPT ![Current_Tail + 1] = srvSent[Current_Tail]]
+    /\ srvReqs' = [srvReqs EXCEPT ![Current_Tail + 1] = srvReqs[Current_Tail+1] \o (srvSent[Current_Tail] \o srvReqs[Current_Tail]) ]
+    /\ srvVals' = [srvVals EXCEPT ![Current_Tail + 1] = srvVals[Current_Tail]]
     /\ Current_Tail' = Current_Tail + 1
+     /\ UNCHANGED  <<reqs, resps, REMOVED_INDICES, False_Tail,srvAck, srvHist, srvMaxWriteSeqNumReceived, srvReplied, srvSent, srvVals >>
     
     
 SyncHistoryWithTailNeighbor ==
     /\  STEP_TAKEN' = "SyncHistoryWithTailNeighbor"
-    /\  False_Tail > Current_Tail
+    /\  Current_Tail < Len(srvVals)
+    /\ srvHist[Current_Tail] # srvHist[Current_Tail + 1] \o RemoveElementsfromSequence(srvSent[Current_Tail], srvHist[Current_Tail + 1])
     /\  IF Len(srvHist[Current_Tail+1]) < Len(srvHist[Current_Tail])
         THEN 
-            srvHist' = [srvHist EXCEPT ![Current_Tail+1] = Append(@, srvHist[Current_Tail][Len(srvHist[Current_Tail+1]) + 1])]
-            srvMaxWriteSeqNumReceived' = [srvMaxWriteSeqNumReceived EXCEPT ![Current_Tail+1] = srvMaxWriteSeqNumReceived[Current_Tail+1] + 1 ]
+            /\  srvHist' = [srvHist EXCEPT ![Current_Tail+1] = Append(@, srvHist[Current_Tail][Len(srvHist[Current_Tail+1]) + 1])]
+            /\  srvMaxWriteSeqNumReceived' = [srvMaxWriteSeqNumReceived EXCEPT ![Current_Tail+1] = srvMaxWriteSeqNumReceived[Current_Tail+1] + 1 ]
         ELSE 
             FALSE
+    /\ UNCHANGED <<Current_Tail, False_Tail, REMOVED_INDICES, reqs, resps, srvAck, srvReplied, srvReqs, srvSent, srvVals>>
     
 
 (* Modifying IssueRead step from CR as it used a constant TAIL, but due to failures, Current_Tail is used here which is updated on each failure*)
@@ -276,12 +277,12 @@ ModifiedCRNext ==
         /\ ModifiedCRIssueRead(rid)
         /\ STEP_TAKEN' = "ModifiedCRIssueRead"
         /\ REMOVED_INDICES' = {}
-        /\ UNCHANGED <<srvAck, srvHist, srvSent, srvMaxWriteSeqNumReceived, Current_Tail>>
+        /\ UNCHANGED <<srvAck, srvHist, srvSent, srvMaxWriteSeqNumReceived, Current_Tail, False_Tail>>
     \/ \E wid \in WID: 
         /\ ModifiedCRIssueWrite(wid) 
         /\ STEP_TAKEN' = "IssueWrite"
         /\ REMOVED_INDICES' = {}
-        /\ UNCHANGED <<srvAck, srvHist, srvSent, Current_Tail>>
+        /\ UNCHANGED <<srvAck, srvHist, srvSent, Current_Tail, False_Tail>>
     \/ \E s \in (1..Current_Tail):
         /\ Len(srvReqs[s]) > 0
         /\ LET o == Head(srvReqs[s]) IN
@@ -289,34 +290,34 @@ ModifiedCRNext ==
                 /\ DropRead(o, s)
                 /\ STEP_TAKEN' = "DropRead"
                 /\ REMOVED_INDICES' = {}
-                /\ UNCHANGED <<srvAck, srvHist, srvSent, srvMaxWriteSeqNumReceived, Current_Tail>>
+                /\ UNCHANGED <<srvAck, srvHist, srvSent, srvMaxWriteSeqNumReceived, Current_Tail, False_Tail>>
             \/ 
                 /\ DropWrite(o, s)
                 /\ STEP_TAKEN' = "DropWrite"
                 /\ REMOVED_INDICES' = {}
-                /\ UNCHANGED <<srvAck, srvHist, srvSent, srvMaxWriteSeqNumReceived, Current_Tail>>
+                /\ UNCHANGED <<srvAck, srvHist, srvSent, srvMaxWriteSeqNumReceived, Current_Tail, False_Tail>>
             \/ 
                 /\ ServerReads(o, s)
                 /\ STEP_TAKEN' = "ServerReads"
                 /\ REMOVED_INDICES' = {}
-                /\ UNCHANGED <<srvAck, srvHist, srvSent, srvMaxWriteSeqNumReceived, Current_Tail>>
+                /\ UNCHANGED <<srvAck, srvHist, srvSent, srvMaxWriteSeqNumReceived, Current_Tail, False_Tail>>
             \/ 
                 /\ ModifiedCRServerWrites(o, s)    
                 /\ STEP_TAKEN' = "ModifiedCRServerWrites"
                 /\ REMOVED_INDICES' = {}
-                /\ UNCHANGED <<Current_Tail>>
+                /\ UNCHANGED <<Current_Tail, False_Tail>>
 
     \/ 
         /\ \E s \in (1..Current_Tail): BackPropagateAck(s)
         /\ STEP_TAKEN' = "BackPropagateAck"
         /\ REMOVED_INDICES' = {}
-        /\ UNCHANGED <<reqs, resps, srvReplied, srvReqs, srvVals, srvHist, srvSent, srvMaxWriteSeqNumReceived, Current_Tail>>
+        /\ UNCHANGED <<reqs, resps, srvReplied, srvReqs, srvVals, srvHist, srvSent, srvMaxWriteSeqNumReceived, Current_Tail, False_Tail>>
         
     \/ 
         /\ \E s \in (1..Current_Tail): UpdateSentFromAck(s)
         /\ STEP_TAKEN' = "UpdateSentFromAck"
         /\ REMOVED_INDICES' = {}
-        /\ UNCHANGED <<reqs, resps, srvReplied, srvReqs, srvVals, srvAck, srvHist, srvMaxWriteSeqNumReceived, Current_Tail>>
+        /\ UNCHANGED <<reqs, resps, srvReplied, srvReqs, srvVals, srvAck, srvHist, srvMaxWriteSeqNumReceived, Current_Tail, False_Tail>>
 
 
 (* Next steps of the spec where it can cause failures of maximum N-1 servers in a N length chain or continue normally with read/write operations. With each step, a STEPS counter is always increased*)
@@ -325,14 +326,14 @@ AddFailStopCRNext ==
     /\
         \/  FailureAndRecoveryStep
         \/  ModifiedCRNext
-        \/  \E num_servers \in {1,2}
+        \/  \E num_servers \in {1,2}:
                 AddNewServertoChain(num_servers)
         \/  SyncHistoryWithTailNeighbor
         \/  ShiftCurrentTailToNewServer
 
 vars == <<srvReplied, srvVals, srvReqs, resps, reqs, STEPS, Current_Tail, REMOVED_INDICES, srvHist, srvSent, srvAck, srvHist, STEP_TAKEN, srvMaxWriteSeqNumReceived, False_Tail>>   
 
-AddFailStopFairness == WF_vars(FailStopCRNext)
+AddFailStopFairness == WF_vars(AddFailStopCRNext)
 
 AddFailStopLiveness == 
     /\ \A req \in reqs:
@@ -340,8 +341,8 @@ AddFailStopLiveness ==
 
 (*Final Spec of Fail Stop CR*)
 AddFailStopCRSpec == 
-    /\ FailStopCRInit 
-    /\ [][FailStopCRNext]_vars 
+    /\ AddFailStopCRInit 
+    /\ [][AddFailStopCRNext]_vars 
 \*    /\ FailStopFairness 
 \*    /\ FailStopLiveness
 
