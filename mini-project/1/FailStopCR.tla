@@ -124,8 +124,8 @@ UpdatePropagationSafety ==
             SubSeq(srvHist[i], 1, Len(srvHist[j])) = srvHist[j]
 
 
-(* Debug Constraints only used when DEBUG_ENABLE constant is 1 in cfg. Does not affect actual FailStopCR spec*)
-DebugTypeOKConstraints ==
+(* Debug Invariants only used when DEBUG_ENABLE constant is 1 in cfg. Does not affect actual FailStopCR spec*)
+DebugTypeOKInvariant ==
     IF DEBUG_ENABLE = 1
     THEN
         /\ STEPS >= 0
