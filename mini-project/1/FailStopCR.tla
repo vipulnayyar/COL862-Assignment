@@ -3,13 +3,23 @@
 
 EXTENDS CR, FiniteSets
 
-VARIABLE STEPS, STEP_TAKEN, Current_Tail, REMOVED_INDICES, srvHist, srvSent, srvAck, srvMaxWriteSeqNumReceived
+VARIABLE
+    STEPS, \* A counter that increases by 1 on each step
+    STEP_TAKEN, \* A string variable that stores the current step being taken
+    Current_Tail, \* stores current position of Tail across failures and normal operations. In CR, TAIL is a constant that cannot change.
+    REMOVED_INDICES, \* Stores set of indices in srvVals that are failed/deleted in FailureStep
+    srvHist, \* Maintains sequence of write updates for each server
+    srvSent, \* Maintains sequence of write updates sent by a server for which it has not received an Ack
+    srvAck, \* Stores set of updates for which a server has received an Ack, based on which corresponding entry can be deleted from srvSent
+    srvMaxWriteSeqNumReceived \* Max sequence number of the last update received by a server
 
 CONSTANT DEBUG_ENABLE
 
+(* Helper function to create a set from elements of a Sequence *)
 SequencetoSet(seq) == 
     {seq[i] : i \in DOMAIN seq}
 
+(* Helper function to return a new sequence from elements in argument 1 seq, that are not present in argument 2 seq*)
 RemoveElementsfromSequence(seq_to_remove_from, filter_seq) ==
     [i \in 1..Cardinality({j \in DOMAIN seq_to_remove_from : seq_to_remove_from[j] \notin  SequencetoSet(filter_seq)}) 
         |-> 
@@ -28,7 +38,7 @@ RemoveElementsfromSequence(seq_to_remove_from, filter_seq) ==
     ]
 
 
-\* Send srvSent updates not present in new successor to its srvReqs
+(* After Failure of a Server S between S- and S+, there can be updates that S- sent to S, but were not received by S+. As part of Failure Recovery, the updates not seen by S+, but sent by S- are sent again to S+, to make the Inprocess Requests Invariant True. The suffix of srvSent of S- to be sent is calculated based on srvMaxWriteSeqNumReceived stored by S-, and subtracting it from srvHist of S-, which is the maximum writes sent by S-. *)
 FailureRecovery(server_state, server_history, server_sent, server_max_write_seq_num) ==
     [
         i \in 1..Len(server_state)
@@ -58,6 +68,7 @@ FailureRecovery(server_state, server_history, server_sent, server_max_write_seq_
     ]
     
 
+(*State of multiple servers and stored in sequence. Failing a server means deleting an element from that sequence, so that  successor and predecessor relationships are implicit based on adjacent neighbors in the new sequence. For a failure, from each srv variable, elements are deleted that are passed in set failed_servers.*)
 FailServer(server_state, failed_servers) == 
     [i \in 1..(Len(server_state) - Cardinality(failed_servers)) 
         |->
@@ -75,24 +86,25 @@ FailServer(server_state, failed_servers) ==
 
 
 
-\* Safety Property
+\* Safety Property added separately as invariant in cfg file
 InprocessRequestsSafety == 
     \A i \in (1..Current_Tail):
         \A j \in (i..Current_Tail):
             srvHist[i] = srvHist[j] \o RemoveElementsfromSequence(srvSent[i], srvHist[j]) 
 
-\* Safety Property
+\* Safety Property added separately as invariant in cfg file
 UpdatePropagationSafety ==
     \A i \in (1..Current_Tail):
         \A j \in (i..Current_Tail):
             SubSeq(srvHist[i], 1, Len(srvHist[j])) = srvHist[j]
 
 
+(* Debug Constraints only used when DEBUG_ENABLE constant is 1 in cfg. Does not affect actual FailStopCR spec*)
 DebugTypeOKConstraints ==
     IF DEBUG_ENABLE = 1
     THEN
         /\ STEPS >= 0
-\*        /\ STEPS < 10
+        /\ STEPS < 10
 \*        /\  srvVals[Current_Tail] \notin DEBUG_NEWVALS
 \*        /\ Cardinality(srvReplied[Current_Tail].w) < 2
 \*        /\ srvVals[Current_Tail] = "v1"
@@ -102,6 +114,7 @@ DebugTypeOKConstraints ==
     ELSE
         TRUE
 
+(*Safety properties for all Variables*)
 FailStopCRTypeOK == 
     /\ srvVals \in [(1..Current_Tail) -> VALS]
     /\ srvReqs \in [(1..Current_Tail) -> Seq(Req)]
@@ -116,6 +129,7 @@ FailStopCRTypeOK ==
     /\ STEPS \in Nat
 
    
+(* Setting initial values of all variables *)
 FailStopCRInit == 
     /\ CRInit
     /\ Current_Tail = TAIL
@@ -127,6 +141,7 @@ FailStopCRInit ==
     /\ REMOVED_INDICES = {}
     /\ STEP_TAKEN = "INIT"
 
+(* Failure and Recovery of new successor/predecessor relationships are done in this step*)
 FailureAndRecoveryStep ==    
     /\ UNCHANGED<<reqs, resps>>
     /\ STEP_TAKEN' = "FailureAndRecoveryStep"
@@ -141,18 +156,18 @@ FailureAndRecoveryStep ==
         /\ srvAck' = FailServer(srvAck, indices_to_remove)
         /\ Current_Tail' = Len(srvVals')
         /\ srvMaxWriteSeqNumReceived' = FailServer(srvMaxWriteSeqNumReceived, indices_to_remove)
-\*        /\ srvReqs' = FailServer(srvReqs, indices_to_remove)
         /\ srvReqs' = FailureRecovery(FailServer(srvReqs, indices_to_remove), FailServer(srvHist, indices_to_remove),  FailServer(srvSent, indices_to_remove), FailServer(srvMaxWriteSeqNumReceived, indices_to_remove) )
 
 
 
-
+(* Modifying IssueRead step from CR as it used a constant TAIL, but due to failures, Current_Tail is used here which is updated on each failure*)
 ModifiedCRIssueRead(rid) ==
     LET op == [id |-> rid] IN
     /\ reqs' = reqs \cup {op}
     /\ srvReqs' = [srvReqs EXCEPT ![Current_Tail] = Append(@, op)]
     /\ UNCHANGED <<srvVals, srvReplied, resps>>
 
+(* Modifying IssueWrite step from CR to increase srvMaxWriteSeqNumReceived on HEAD *)
 ModifiedCRIssueWrite(wid) ==
     \E v \in VALS:
         LET op == [id |-> wid, v |-> v] IN
@@ -161,6 +176,7 @@ ModifiedCRIssueWrite(wid) ==
         /\ srvMaxWriteSeqNumReceived' = [srvMaxWriteSeqNumReceived EXCEPT ![HEAD] = srvMaxWriteSeqNumReceived[HEAD] + 1 ]
         /\ UNCHANGED <<srvVals, srvReplied, resps>>
 
+(* Modifying ServerWrites step from CR to store srvHist, srvAck, srvSent, srvMaxWriteSeqNumReceived and on each server*)
 ModifiedCRServerWrites(op, s) ==
     /\ op.id \in WID
     /\ op.id \notin srvReplied[s].w
@@ -180,17 +196,19 @@ ModifiedCRServerWrites(op, s) ==
           /\ UNCHANGED <<srvAck>>
     /\ UNCHANGED <<reqs>>
 
-
+(* After Tail finishes a write, it adds that write to its local srvAck. This ack is back propagated back through the chain *)
 BackPropagateAck(s) ==
     /\ s > HEAD
     /\ Cardinality(srvAck[s] \ srvAck[s-1]) > 0
     /\ srvAck' = [srvAck EXCEPT ![s-1] = srvAck[s]]
 
+(* For each server, head of srvSent is removed if an ack for that write is received and present in its srvAck*)
 UpdateSentFromAck(s) ==
     /\ Len(srvSent[s]) > 0
     /\ Head(srvSent[s]) \in srvAck[s]
     /\ srvSent' = [srvSent EXCEPT ![s] = Tail(@)]
 
+(* Steps related to read and write ops*)
 ModifiedCRNext == 
     \/ \E rid \in RID: 
         /\ ModifiedCRIssueRead(rid)
@@ -239,7 +257,7 @@ ModifiedCRNext ==
         /\ UNCHANGED <<reqs, resps, srvReplied, srvReqs, srvVals, srvAck, srvHist, srvMaxWriteSeqNumReceived, Current_Tail>>
 
 
-
+(* Next steps of the spec where it can cause failures of maximum N-1 servers in a N length chain or continue normally with read/write operations. With each step, a STEPS counter is always increased*)
 FailStopCRNext == 
     /\  STEPS' = STEPS + 1
     /\
@@ -247,7 +265,9 @@ FailStopCRNext ==
         \/ ModifiedCRNext
             
 
+\*FailStopFairness == WF_srvVals_srvReqs(FailStopCRNext)
 
-FailStopCRSpec == FailStopCRInit /\ [][FailStopCRNext]_<<srvReplied, srvVals, srvReqs, resps, reqs, STEPS, Current_Tail, REMOVED_INDICES, srvHist, srvSent, srvAck, srvHist, STEP_TAKEN, srvMaxWriteSeqNumReceived>>
+(*Final Spec of Fail Stop CR*)
+FailStopCRSpec == FailStopCRInit /\ [][FailStopCRNext]_<<srvReplied, srvVals, srvReqs, resps, reqs, STEPS, Current_Tail, REMOVED_INDICES, srvHist, srvSent, srvAck, srvHist, STEP_TAKEN, srvMaxWriteSeqNumReceived>> 
 
 =============================================================================
