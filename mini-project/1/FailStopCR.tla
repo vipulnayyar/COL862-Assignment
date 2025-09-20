@@ -3,7 +3,7 @@
 
 EXTENDS CR, FiniteSets
 
-VARIABLE DEBUG_STEPS, DEBUG_STEP_TAKEN, Current_Tail, DEBUG_REMOVED_INDICES, srvHist, srvSent, srvAck
+VARIABLE STEPS, STEP_TAKEN, Current_Tail, REMOVED_INDICES, srvHist, srvSent, srvAck, srvMaxWriteSeqNumReceived
 
 CONSTANT DEBUG_ENABLE
 
@@ -29,7 +29,7 @@ RemoveElementsfromSequence(seq_to_remove_from, filter_seq) ==
 
 
 \* Send srvSent updates not present in new successor to its srvReqs
-FailureRecovery(server_state, server_history, server_sent) ==
+FailureRecovery(server_state, server_history, server_sent, server_max_write_seq_num) ==
     [
         i \in 1..Len(server_state)
             |->
@@ -41,8 +41,14 @@ FailureRecovery(server_state, server_history, server_sent) ==
                     
                         LET
 
-                        CurrentSequenceCount == Len(server_history[i] \o RemoveElementsfromSequence(server_state[i], server_history[i]))
+                        \*CurrentSequenceCount == Len(server_history[i] \o RemoveElementsfromSequence(server_state[i], server_history[i]))
+                        
+                        CurrentSequenceCount == server_max_write_seq_num[i]
+
                         PreviousSequenceCount == Len(server_history[i-1])
+
+                        \*PreviousSequenceCount == server_max_write_seq_num[i-1]
+                        
                         LengthofPrevSentToTransfer == PreviousSequenceCount - CurrentSequenceCount
 
                         IN
@@ -82,14 +88,11 @@ UpdatePropagationSafety ==
             SubSeq(srvHist[i], 1, Len(srvHist[j])) = srvHist[j]
 
 
-
-CONSTANT  DEBUG_NEWVALS
-
 DebugTypeOKConstraints ==
     IF DEBUG_ENABLE = 1
     THEN
-\*        /\ TRUE
-        /\ DEBUG_STEPS < 15
+        /\ STEPS >= 0
+\*        /\ STEPS < 10
 \*        /\  srvVals[Current_Tail] \notin DEBUG_NEWVALS
 \*        /\ Cardinality(srvReplied[Current_Tail].w) < 2
 \*        /\ srvVals[Current_Tail] = "v1"
@@ -100,17 +103,18 @@ DebugTypeOKConstraints ==
         TRUE
 
 FailStopCRTypeOK == 
-    /\ srvVals \in [(1..Len(srvVals)) -> VALS]
-    /\ srvReqs \in [(1..Len(srvReqs)) -> Seq(Req)]
-    /\ srvReplied \in [(1..Len(srvReplied)) -> [r: SUBSET RID, w: SUBSET WID]]
+    /\ srvVals \in [(1..Current_Tail) -> VALS]
+    /\ srvReqs \in [(1..Current_Tail) -> Seq(Req)]
+    /\ srvReplied \in [(1..Current_Tail) -> [r: SUBSET RID, w: SUBSET WID]]
     /\ resps \in Seq(Res)
     /\ reqs \subseteq Req
+    /\ srvHist \in [(1..Current_Tail) -> Seq(WrReq)]
+    /\ srvMaxWriteSeqNumReceived \in [(1..Current_Tail) -> Nat]
+    /\ srvSent \in [(1..Current_Tail) -> Seq(WrReq)]
+    /\ srvAck \in [(1..Current_Tail) -> SUBSET WID]
+    /\ REMOVED_INDICES \in SUBSET(Nat \ {0})
+    /\ STEPS \in Nat
 
-
-DebugInit ==
-    /\ DEBUG_STEPS = 0
-    /\ DEBUG_REMOVED_INDICES = {}
-    /\ DEBUG_STEP_TAKEN = "INIT"
    
 FailStopCRInit == 
     /\ CRInit
@@ -118,21 +122,27 @@ FailStopCRInit ==
     /\ srvHist = [s \in (1..Current_Tail) |-> <<>>]
     /\ srvSent = [s \in (1..Current_Tail) |-> <<>>]
     /\ srvAck = [s \in (1..Current_Tail) |-> {}]
-    /\ DebugInit
+    /\ srvMaxWriteSeqNumReceived = [s \in (1..Current_Tail) |-> 0 ]
+    /\ STEPS = 0
+    /\ REMOVED_INDICES = {}
+    /\ STEP_TAKEN = "INIT"
 
-FailureStep ==    
-    /\ DEBUG_STEP_TAKEN' = "FailureStep"
+FailureAndRecoveryStep ==    
+    /\ UNCHANGED<<reqs, resps>>
+    /\ STEP_TAKEN' = "FailureAndRecoveryStep"
     /\ \E indices_to_remove \in SUBSET(1..Current_Tail):
         /\ Cardinality(indices_to_remove) < Current_Tail
-        /\ DEBUG_REMOVED_INDICES' = indices_to_remove
+        /\ Cardinality(indices_to_remove) > 0
+        /\ REMOVED_INDICES' = indices_to_remove
         /\ srvVals' = FailServer(srvVals, indices_to_remove)
         /\ srvReplied' = FailServer(srvReplied, indices_to_remove)
         /\ srvHist' = FailServer(srvHist, indices_to_remove)
         /\ srvSent' = FailServer(srvSent, indices_to_remove)
         /\ srvAck' = FailServer(srvAck, indices_to_remove)
         /\ Current_Tail' = Len(srvVals')
+        /\ srvMaxWriteSeqNumReceived' = FailServer(srvMaxWriteSeqNumReceived, indices_to_remove)
 \*        /\ srvReqs' = FailServer(srvReqs, indices_to_remove)
-        /\ srvReqs' = FailureRecovery(FailServer(srvReqs, indices_to_remove), FailServer(srvHist, indices_to_remove), FailServer(srvSent, indices_to_remove))
+        /\ srvReqs' = FailureRecovery(FailServer(srvReqs, indices_to_remove), FailServer(srvHist, indices_to_remove),  FailServer(srvSent, indices_to_remove), FailServer(srvMaxWriteSeqNumReceived, indices_to_remove) )
 
 
 
@@ -142,6 +152,14 @@ ModifiedCRIssueRead(rid) ==
     /\ reqs' = reqs \cup {op}
     /\ srvReqs' = [srvReqs EXCEPT ![Current_Tail] = Append(@, op)]
     /\ UNCHANGED <<srvVals, srvReplied, resps>>
+
+ModifiedCRIssueWrite(wid) ==
+    \E v \in VALS:
+        LET op == [id |-> wid, v |-> v] IN
+        /\ reqs' = reqs \cup {op}
+        /\ srvReqs' = [srvReqs EXCEPT ![HEAD] = Append(@, op)]
+        /\ srvMaxWriteSeqNumReceived' = [srvMaxWriteSeqNumReceived EXCEPT ![HEAD] = srvMaxWriteSeqNumReceived[HEAD] + 1 ]
+        /\ UNCHANGED <<srvVals, srvReplied, resps>>
 
 ModifiedCRServerWrites(op, s) ==
     /\ op.id \in WID
@@ -154,8 +172,10 @@ ModifiedCRServerWrites(op, s) ==
           /\ resps' = Append(resps, [id |-> op.id])
           /\ srvAck' = [srvAck EXCEPT ![s] = @ \union {op.id} ]
           /\ srvReqs' = srvReqs
+          /\ UNCHANGED <<srvMaxWriteSeqNumReceived>>
        \/ /\ s+1 <= Current_Tail
           /\ srvReqs' = [srvReqs  EXCEPT ![s+1] = Append(@, op)]
+          /\ srvMaxWriteSeqNumReceived' = [srvMaxWriteSeqNumReceived  EXCEPT ![s+1] = srvMaxWriteSeqNumReceived[s+1] + 1 ]
           /\ resps' = resps
           /\ UNCHANGED <<srvAck>>
     /\ UNCHANGED <<reqs>>
@@ -174,61 +194,60 @@ UpdateSentFromAck(s) ==
 ModifiedCRNext == 
     \/ \E rid \in RID: 
         /\ ModifiedCRIssueRead(rid)
-        /\ DEBUG_STEP_TAKEN' = "ModifiedCRIssueRead"
-        /\ UNCHANGED <<srvAck, srvHist, srvSent>>
+        /\ STEP_TAKEN' = "ModifiedCRIssueRead"
+        /\ REMOVED_INDICES' = {}
+        /\ UNCHANGED <<srvAck, srvHist, srvSent, srvMaxWriteSeqNumReceived, Current_Tail>>
     \/ \E wid \in WID: 
-        /\ IssueWrite(wid) 
-        /\ DEBUG_STEP_TAKEN' = "IssueWrite"
-        /\ UNCHANGED <<srvAck, srvHist, srvSent>>
+        /\ ModifiedCRIssueWrite(wid) 
+        /\ STEP_TAKEN' = "IssueWrite"
+        /\ REMOVED_INDICES' = {}
+        /\ UNCHANGED <<srvAck, srvHist, srvSent, Current_Tail>>
     \/ \E s \in (1..Current_Tail):
         /\ Len(srvReqs[s]) > 0
         /\ LET o == Head(srvReqs[s]) IN
             \/ 
                 /\ DropRead(o, s)
-                /\ DEBUG_STEP_TAKEN' = "DropRead"
-                /\ UNCHANGED <<srvAck, srvHist, srvSent>>
+                /\ STEP_TAKEN' = "DropRead"
+                /\ REMOVED_INDICES' = {}
+                /\ UNCHANGED <<srvAck, srvHist, srvSent, srvMaxWriteSeqNumReceived, Current_Tail>>
             \/ 
                 /\ DropWrite(o, s)
-                /\ DEBUG_STEP_TAKEN' = "DropWrite"
-                /\ UNCHANGED <<srvAck, srvHist, srvSent>>
+                /\ STEP_TAKEN' = "DropWrite"
+                /\ REMOVED_INDICES' = {}
+                /\ UNCHANGED <<srvAck, srvHist, srvSent, srvMaxWriteSeqNumReceived, Current_Tail>>
             \/ 
                 /\ ServerReads(o, s)
-                /\ DEBUG_STEP_TAKEN' = "ServerReads"
-                /\ UNCHANGED <<srvAck, srvHist, srvSent>>
+                /\ STEP_TAKEN' = "ServerReads"
+                /\ REMOVED_INDICES' = {}
+                /\ UNCHANGED <<srvAck, srvHist, srvSent, srvMaxWriteSeqNumReceived, Current_Tail>>
             \/ 
                 /\ ModifiedCRServerWrites(o, s)    
-                /\ DEBUG_STEP_TAKEN' = "ModifiedCRServerWrites"
+                /\ STEP_TAKEN' = "ModifiedCRServerWrites"
+                /\ REMOVED_INDICES' = {}
+                /\ UNCHANGED <<Current_Tail>>
 
     \/ 
         /\ \E s \in (1..Current_Tail): BackPropagateAck(s)
-        /\ DEBUG_STEP_TAKEN' = "BackPropagateAck"
-        /\ UNCHANGED <<reqs, resps, srvReplied, srvReqs, srvVals, srvHist, srvSent>>
+        /\ STEP_TAKEN' = "BackPropagateAck"
+        /\ REMOVED_INDICES' = {}
+        /\ UNCHANGED <<reqs, resps, srvReplied, srvReqs, srvVals, srvHist, srvSent, srvMaxWriteSeqNumReceived, Current_Tail>>
         
     \/ 
         /\ \E s \in (1..Current_Tail): UpdateSentFromAck(s)
-        /\ DEBUG_STEP_TAKEN' = "UpdateSentFromAck"
-        /\ UNCHANGED <<reqs, resps, srvReplied, srvReqs, srvVals, srvAck, srvHist>>
-
-
+        /\ STEP_TAKEN' = "UpdateSentFromAck"
+        /\ REMOVED_INDICES' = {}
+        /\ UNCHANGED <<reqs, resps, srvReplied, srvReqs, srvVals, srvAck, srvHist, srvMaxWriteSeqNumReceived, Current_Tail>>
 
 
 
 FailStopCRNext == 
-    
-    /\  IF DEBUG_ENABLE = 1
-        THEN
-            DEBUG_STEPS' = DEBUG_STEPS + 1
-        ELSE
-            UNCHANGED <<DEBUG_STEPS, DEBUG_REMOVED_INDICES, DEBUG_STEP_TAKEN >>
+    /\  STEPS' = STEPS + 1
     /\
-        \/  
-            /\ FailureStep
-            /\ UNCHANGED <<reqs, resps>>
-        \/ 
-            /\ ModifiedCRNext
-            /\ UNCHANGED  <<Current_Tail, DEBUG_REMOVED_INDICES>>
+        \/ FailureAndRecoveryStep
+        \/ ModifiedCRNext
+            
 
 
-FailStopCRSpec == FailStopCRInit /\ [][FailStopCRNext]_<<srvReplied, srvVals, srvReqs, resps, reqs, DEBUG_STEPS, Current_Tail, DEBUG_REMOVED_INDICES, srvHist, srvSent, srvAck, srvHist, DEBUG_STEP_TAKEN>>
+FailStopCRSpec == FailStopCRInit /\ [][FailStopCRNext]_<<srvReplied, srvVals, srvReqs, resps, reqs, STEPS, Current_Tail, REMOVED_INDICES, srvHist, srvSent, srvAck, srvHist, STEP_TAKEN, srvMaxWriteSeqNumReceived>>
 
 =============================================================================
