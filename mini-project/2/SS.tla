@@ -74,17 +74,20 @@ ApplyWrite(op) ==
     /\ accepted' = [accepted EXCEPT !.w = @ \cup {op.id}]
     /\ UNCHANGED reqs
 
+ForgetReadHistoryonTail ==
+    /\ accepted' = [accepted EXCEPT !.r = {}]
+    /\ UNCHANGED <<reqs, val, resps>>
+
 SSNext == 
-    /\ TRUE
-\*    /\ UNCHANGED <<reqs, resps, val, accepted>>
-\*    \/ \E rid \in RID: IssueRead(rid)
-\*    \/ \E wid \in WID: IssueWrite(wid)
-(*    \/ \E op \in reqs: 
+    \/ \E rid \in RID: IssueRead(rid)
+    \/ \E wid \in WID: IssueWrite(wid)
+    \/ \E op \in reqs: 
         \/ LostRead(op)
         \/ LostWrite(op)
         \/ ApplyRead(op)
         \/ ApplyWrite(op)
-*)
+    \/ ForgetReadHistoryonTail
+
 SSSpec == SSInit /\ [][SSNext]_<<reqs, val, accepted, resps>>
 
 THEOREM SSSpec => [] SSTypeOK

@@ -7,7 +7,7 @@ VARIABLE
     STEPS, \* A counter that increases by 1 on each step
     STEP_TAKEN, \* A string variable that stores the current step being taken
     Current_Tail, \* stores current position of Tail across failures and normal operations. In CR, TAIL is a constant that cannot change.
-    REMOVED_INDICES, \* Stores set of indices in srvVals that are failed/deleted in FailureStep
+    REMOVED_INDICES, \* Stores set of indices in srvVals that are failed/deleted in FailureAndRecoveryStep
     srvHist, \* Maintains sequence of write updates for each server
     srvSent, \* Maintains sequence of write updates sent by a server for which it has not received an Ack
     srvAck, \* Stores set of updates for which a server has received an Ack, based on which corresponding entry can be deleted from srvSent
@@ -18,6 +18,31 @@ CONSTANT DEBUG_ENABLE
 (* Helper function to create a set from elements of a Sequence *)
 SequencetoSet(seq) == 
     {seq[i] : i \in DOMAIN seq}
+
+(* Sync reads from resps to last server, needed in case Tail fails *)
+SyncSrvRepliedReadsFromResps(srvRepliedState, respsState) ==
+    [   i \in 1..Len(srvRepliedState) 
+        |-> 
+        IF 
+            i = Len(srvRepliedState) 
+        THEN 
+            [   r |-> 
+                    srvRepliedState[i].r 
+                    \union  
+                    {
+                        r.id : r \in
+                            {   resp \in {respsState[j] : j \in DOMAIN respsState}
+                                :
+                                resp \in RdRes
+                                            
+                            }
+                    }
+                , 
+                w |-> srvRepliedState[i].w]  
+        ELSE 
+            srvRepliedState[i] ]
+
+
 
 (* Helper function to return a new sequence from elements in argument 1 seq, that are not present in argument 2 seq*)
 RemoveElementsfromSequence(seq_to_remove_from, filter_seq) ==
@@ -104,7 +129,7 @@ DebugTypeOKConstraints ==
     IF DEBUG_ENABLE = 1
     THEN
         /\ STEPS >= 0
-        /\ STEPS < 10
+\*        /\ STEPS < 50
 \*        /\  srvVals[Current_Tail] \notin DEBUG_NEWVALS
 \*        /\ Cardinality(srvReplied[Current_Tail].w) < 2
 \*        /\ srvVals[Current_Tail] = "v1"
@@ -150,19 +175,23 @@ FailureAndRecoveryStep ==
         /\ Cardinality(indices_to_remove) > 0
         /\ REMOVED_INDICES' = indices_to_remove
         /\ srvVals' = FailServer(srvVals, indices_to_remove)
-        /\ srvReplied' = FailServer(srvReplied, indices_to_remove)
+        
         /\ srvHist' = FailServer(srvHist, indices_to_remove)
         /\ srvSent' = FailServer(srvSent, indices_to_remove)
         /\ srvAck' = FailServer(srvAck, indices_to_remove)
         /\ Current_Tail' = Len(srvVals')
         /\ srvMaxWriteSeqNumReceived' = FailServer(srvMaxWriteSeqNumReceived, indices_to_remove)
         /\ srvReqs' = FailureRecovery(FailServer(srvReqs, indices_to_remove), FailServer(srvHist, indices_to_remove),  FailServer(srvSent, indices_to_remove), FailServer(srvMaxWriteSeqNumReceived, indices_to_remove) )
+        /\ resps' = resps \o RemoveElementsfromSequence(FailServer(srvSent, indices_to_remove)[Current_Tail'], resps) \* Sending Writes to resps if Tail is removed
+        /\ srvReplied' = FailServer(srvReplied, indices_to_remove)
+\*        /\ srvReplied' = SyncSrvRepliedReadsFromResps(FailServer(srvReplied, indices_to_remove), resps) \* Updating srvReplied reads in the new pre-tail server from resps(Needed for refinement mapping with SS)
 
 
 
 (* Modifying IssueRead step from CR as it used a constant TAIL, but due to failures, Current_Tail is used here which is updated on each failure*)
 ModifiedCRIssueRead(rid) ==
     LET op == [id |-> rid] IN
+    /\ op \notin reqs
     /\ reqs' = reqs \cup {op}
     /\ srvReqs' = [srvReqs EXCEPT ![Current_Tail] = Append(@, op)]
     /\ UNCHANGED <<srvVals, srvReplied, resps>>
@@ -171,6 +200,7 @@ ModifiedCRIssueRead(rid) ==
 ModifiedCRIssueWrite(wid) ==
     \E v \in VALS:
         LET op == [id |-> wid, v |-> v] IN
+        /\ op \notin reqs
         /\ reqs' = reqs \cup {op}
         /\ srvReqs' = [srvReqs EXCEPT ![HEAD] = Append(@, op)]
         /\ srvMaxWriteSeqNumReceived' = [srvMaxWriteSeqNumReceived EXCEPT ![HEAD] = srvMaxWriteSeqNumReceived[HEAD] + 1 ]
@@ -263,11 +293,16 @@ FailStopCRNext ==
     /\
         \/ FailureAndRecoveryStep
         \/ ModifiedCRNext
-            
 
-\*FailStopFairness == WF_srvVals_srvReqs(FailStopCRNext)
+vars == <<srvReplied, srvVals, srvReqs, resps, reqs, STEPS, Current_Tail, REMOVED_INDICES, srvHist, srvSent, srvAck, srvHist, STEP_TAKEN, srvMaxWriteSeqNumReceived>>   
+
+FailStopFairness == WF_vars(FailStopCRNext)
+
+FailStopLiveness == 
+    /\ \A req \in reqs:
+        []<>(req \in SequencetoSet(resps)) 
 
 (*Final Spec of Fail Stop CR*)
-FailStopCRSpec == FailStopCRInit /\ [][FailStopCRNext]_<<srvReplied, srvVals, srvReqs, resps, reqs, STEPS, Current_Tail, REMOVED_INDICES, srvHist, srvSent, srvAck, srvHist, STEP_TAKEN, srvMaxWriteSeqNumReceived>> 
+FailStopCRSpec == FailStopCRInit /\ [][FailStopCRNext]_vars /\ FailStopFairness /\ FailStopLiveness
 
 =============================================================================
