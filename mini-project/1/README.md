@@ -4,7 +4,7 @@
 Similar to CR.tla, the state of each server is maintained in sequences(array) with each element of the array representing a specific type of information about that server. Information related to HEAD is always stored at the first location in the sequence, and similarly, information about TAIL is always stored at the last location in the sequence.
 The successor-predecessor links in the CR chain are implicitly maintained by servers being adjacent to each other in the sequence, even after failures.
 
-Failure of a server is modelled by deleting the specific element from the sequence. Head and Tail can also be deleted. At most N-1 servers can be deleted.
+Failure of a server is modeled by deleting the specific element from the sequence. Head and Tail can also be deleted. At most N-1 servers can be deleted.
 
 The following variables are used to store state information about servers in a chain:
 
@@ -40,5 +40,9 @@ Following major safety invariants are used:
 
 Following Liveness properties are used:
 
-- AddFailStopLiveness : For all requests in `reqs`, it always happens that the request is eventually found in `resps`
-- EventuallySyncwithNewServers : It always happens that eventually Current_Tail and False_Tail will be equal. On addition of new servers, Current_Tail and False_Tail becomes unequal, they should eventually be equal implying that new servers and eventually synced with the Tail, and Tail is moved to the new server.
+- FailStopLiveness : For all requests in `reqs`, it always happens that the request is eventually found in `resps`
+
+Following Fairness property is used:
+```
+FailStopFairness == WF_vars(FailStopCRNext)
+```

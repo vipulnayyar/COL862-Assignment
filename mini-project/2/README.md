@@ -18,3 +18,10 @@ ForgetReadHistoryonTail ==
     /\ accepted' = [accepted EXCEPT !.r = {}] \* Does not impact consistency of data
     /\ UNCHANGED <<reqs, val, resps>>
 ```
+
+The following SYMMETRY and CONSTRAINT are used to reduce the search state space:
+
+```
+Symmetries == Permutations(VALS) \cup Permutations(RID) \cup Permutations(WID)
+LimitedMsgs == \A s \in (1..Current_Tail): Len(srvReqs[s]) <= 2
+```
