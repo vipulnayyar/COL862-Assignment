@@ -11,7 +11,7 @@ VARIABLE
     srvSent, \* Maintains sequence of write updates sent by a server for which it has not received an Ack
     srvAck, \* Stores set of updates for which a server has received an Ack, based on which corresponding entry can be deleted from srvSent
     srvMaxWriteSeqNumReceived, \* Max sequence number of the last update received by a server
-    False_Tail,
+    False_Tail, \* Tracks last element in a chain which has not caught up. If all servers have caught up, this is equal to Current_Tail
     NUM_SERVERS_DELETED, \* Var to keep track of how many servers have been deleted since the beginning
     NUM_SERVERS_ADDED \* Var to keep track of how many servers have been added since the beginning
 

@@ -16,6 +16,9 @@ The following variables are used to store state information about servers in a c
 - srvSent : Maintains sequence of write updates sent by a server for which it has not received an Ack
 - srvAck : Stores set of updates for which a server has received an Ack, based on which corresponding entry can be deleted from srvSent
 - srvMaxWriteSeqNumReceived : Max sequence number of the last update received by a server
+- False_Tail :Tracks last element in a chain which has not caught up. If all servers have caught up, this is equal to Current_Tail
+- NUM_SERVERS_DELETED : Var to keep track of how many servers have been deleted since the beginning.
+- NUM_SERVERS_ADDED : Var to keep track of how many servers have been added since the beginning.
 
 The following steps are allowed:
 
@@ -31,14 +34,21 @@ The following steps are allowed:
 
 - FailureAndRecoveryStep : For all possible sets of servers in the chain, assuming atleast one server is always live, one or more servers are failed in the chain, and its neighbors are synced after deletion in a single step.
 
+- AddNewServertoChain : Adds one or a maximum of two servers in pipelined manner after Current_Tail
+- SyncHistoryWithNewServer : Each new server after Current_Tail receives updates from srvHist of its predecessor, until Inprocess Requests Invariant is satisfied.
+- ShiftCurrentTailToNewServer : When the `Inprocess Requests Invariant` is satisfied for Current_Tail and its immediate new successor, Tail is switched to this new successor.
 
 Following major safety invariants are used:
 
 - UpdatePropagationSafety : Ensures that for all (non-new)servers, their history sequence(`srvHist`) is a prefix for all its predecessor histories
 - InprocessRequestsSafety : Ensures that for all (non-new)servers i,j in the chain, where `i<=j`, `srvHist[i] = srvHist[j] + Sent[i]` (Here + represents combining two sequences where no duplicates are present and total order among updates are maintained)
 
-
 Following Liveness properties are used:
 
 - AddFailStopLiveness : For all requests in `reqs`, it always happens that the request is eventually found in `resps`
 - EventuallySyncwithNewServers : It always happens that eventually Current_Tail and False_Tail will be equal. On addition of new servers, Current_Tail and False_Tail becomes unequal, they should eventually be equal implying that new servers and eventually synced with the Tail, and Tail is moved to the new server.
+
+Following Fairness Property is used:
+```
+AddFailStopFairness == WF_vars(AddFailStopCRNext)
+```
