@@ -4,11 +4,16 @@ EXTENDS AddFailStopCR, FiniteSets, TLC
 Symmetries == Permutations(VALS) \cup Permutations(RID) \cup Permutations(WID)
 LimitedMsgs == \A s \in (1..Current_Tail): Len(srvReqs[s]) <= 2
 
+LimitedServers == Len(srvVals) <= 4
+
+LimitedServerAddition == NUM_SERVERS_ADDED <= 2
+LimitedServerDeletion == NUM_SERVERS_DELETED <= 2
+
 \*DebugConstraints == 
 \*    /\ TRUE
 \*    /\ Len(srvVals) = 4
 
-
+(*
 RemoveReadsfromSequenceToSet(seq_data) ==
      {
         w.id : w \in
@@ -61,20 +66,13 @@ RemoveWriteReqfromSequence(seq_to_remove_from) ==
                 seq_to_remove_from[filteredindexes[i]] 
     ]
 
+*)
 
 
 
 
 
-val_mapping == 
-    IF 
-        Len(srvHist[Current_Tail]) > 0
-    THEN
-        srvHist[Current_Tail][Len(srvHist[Current_Tail])].v
-    ELSE 
-        INITVAL
-
-accepted_mapping == 
+(* accepted_mapping == 
     [ 
         r |-> 
             srvReplied[Current_Tail].r
@@ -87,7 +85,15 @@ accepted_mapping ==
             \union 
             RemoveReadsfromSequenceToSet(srvReqs[Current_Tail])
             
-    ]
+    ] *)
+
+val_mapping == 
+    IF 
+        Len(srvHist[Current_Tail]) > 0
+    THEN
+        srvHist[Current_Tail][Len(srvHist[Current_Tail])].v
+    ELSE 
+        INITVAL
 
 
 SS == INSTANCE SS WITH
