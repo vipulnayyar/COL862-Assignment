@@ -25,8 +25,6 @@ The following steps are allowed:
 - ModifiedCRNext
     - ModifiedCRIssueRead : Similar to CR IssueRead, but uses Current_Tail instead of TAIL from CR and ensures that a unique read is only added to the request queue of Tail once, by checking its presence in reqs set.
     - ModifiedCRIssueWrite : Similar to CR IssueWrite, but uses Current_Tail instead of TAIL from CR and ensures that a unique write is only added to the request queue of Tail once, by checking its presence in reqs set.
-    - DropRead(from CR.tla)
-    - DropWrite(from CR.tla)
     - ServerReads(from CR.tla)
     - ModifiedCRServerWrites : Similar to CR ServerWrites, but uses Current_Tail instead of TAIL, and adds sent writes to the Sent sequence on each non-Tail server. Also generates Ack for a write if it is written to Tail.
     - BackPropagateAck : If a server has Acks that are not present in its predecessor, then those unseen Acks are sent to the immediate predecessor on the chain.
