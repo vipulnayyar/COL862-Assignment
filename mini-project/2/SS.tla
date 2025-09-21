@@ -74,8 +74,11 @@ ApplyWrite(op) ==
     /\ accepted' = [accepted EXCEPT !.w = @ \cup {op.id}]
     /\ UNCHANGED reqs
 
+(* Since only Tail services reads, it has the only copy of read history in the chain. If Tail fails, this read history cannot be recovered from any neighbor, or any other node in the chain. Write history can be recovered from new Tail, along with new writes that had not reached the earlier failed Tail. 
+
+When a new server is made Tail, the old Tail can forget query requests*)
 ForgetReadHistoryonTail ==
-    /\ accepted' = [accepted EXCEPT !.r = {}]
+    /\ accepted' = [accepted EXCEPT !.r = {}] \* Does not impact consistency of data
     /\ UNCHANGED <<reqs, val, resps>>
 
 SSNext == 

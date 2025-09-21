@@ -212,17 +212,17 @@ ModifiedCRServerWrites(op, s) ==
     /\ op.id \notin srvReplied[s].w
     /\ srvReplied' = [srvReplied EXCEPT ![s] = [@ EXCEPT !.w = @ \union {op.id}]]
     /\ srvHist' = [srvHist EXCEPT ![s] = Append(@, op)]
-    /\ srvSent' = [srvSent EXCEPT ![s] = Append(@, op)]
     /\ srvVals' = [srvVals EXCEPT ![s] = op.v]
     /\ \/ /\ s+1 > Current_Tail 
           /\ resps' = Append(resps, [id |-> op.id])
           /\ srvAck' = [srvAck EXCEPT ![s] = @ \union {op.id} ]
           /\ srvReqs' = srvReqs
-          /\ UNCHANGED <<srvMaxWriteSeqNumReceived>>
+          /\ UNCHANGED <<srvMaxWriteSeqNumReceived, srvSent>>
        \/ /\ s+1 <= Current_Tail
           /\ srvReqs' = [srvReqs  EXCEPT ![s+1] = Append(@, op)]
           /\ srvMaxWriteSeqNumReceived' = [srvMaxWriteSeqNumReceived  EXCEPT ![s+1] = srvMaxWriteSeqNumReceived[s+1] + 1 ]
           /\ resps' = resps
+          /\ srvSent' = [srvSent EXCEPT ![s] = Append(@, op)]
           /\ UNCHANGED <<srvAck>>
     /\ UNCHANGED <<reqs>>
 

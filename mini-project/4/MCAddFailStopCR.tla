@@ -9,8 +9,89 @@ LimitedMsgs == \A s \in (1..Current_Tail): Len(srvReqs[s]) <= 2
 \*    /\ Len(srvVals) = 4
 
 
+RemoveReadsfromSequenceToSet(seq_data) ==
+     {
+        w.id : w \in
+            {   op \in {seq_data[i] : i \in DOMAIN seq_data}
+                :
+                op \in WrReq
+                            
+            }
+    }
+
+RemoveWritesfromSequenceToSet(seq_data) ==
+     {
+        w.id : w \in
+            {   op \in {seq_data[i] : i \in DOMAIN seq_data}
+                :
+                op \in RdReq
+                            
+            }
+    }
+
+RemoveReadReqfromSequence(seq_to_remove_from) ==
+    [i \in 1..Cardinality({j \in DOMAIN seq_to_remove_from : seq_to_remove_from[j] \notin  RdReq}) 
+        |-> 
+            LET 
+                validindexes == 
+                    [j \in 1..Len(seq_to_remove_from) 
+                        |-> 
+                            IF seq_to_remove_from[j] \in RdReq THEN 0 ELSE j]
+
+                filteredindexes == 
+                    SelectSeq(validindexes, LAMBDA x : x > 0)
+
+            IN 
+                seq_to_remove_from[filteredindexes[i]] 
+    ]
+
+RemoveWriteReqfromSequence(seq_to_remove_from) ==
+    [i \in 1..Cardinality({j \in DOMAIN seq_to_remove_from : seq_to_remove_from[j] \notin  RdReq}) 
+        |-> 
+            LET 
+                validindexes == 
+                    [j \in 1..Len(seq_to_remove_from) 
+                        |-> 
+                            IF seq_to_remove_from[j] \in WrReq THEN 0 ELSE j]
+
+                filteredindexes == 
+                    SelectSeq(validindexes, LAMBDA x : x > 0)
+
+            IN 
+                seq_to_remove_from[filteredindexes[i]] 
+    ]
+
+
+
+
+
+
+val_mapping == 
+    IF 
+        Len(srvHist[Current_Tail]) > 0
+    THEN
+        srvHist[Current_Tail][Len(srvHist[Current_Tail])].v
+    ELSE 
+        INITVAL
+
+accepted_mapping == 
+    [ 
+        r |-> 
+            srvReplied[Current_Tail].r
+            \union 
+            RemoveWritesfromSequenceToSet(srvReqs[Current_Tail])
+        , 
+
+        w |-> 
+            srvReplied[Current_Tail].w 
+            \union 
+            RemoveReadsfromSequenceToSet(srvReqs[Current_Tail])
+            
+    ]
+
+
 SS == INSTANCE SS WITH
-    val <- srvVals[Current_Tail]
+    val <- val_mapping
     ,
     accepted <- srvReplied[Current_Tail]
 

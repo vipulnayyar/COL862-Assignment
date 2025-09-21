@@ -64,11 +64,11 @@ RemoveElementsfromSequence(seq_to_remove_from, filter_seq) ==
 
 
 (* After Failure of a Server S between S- and S+, there can be updates that S- sent to S, but were not received by S+. As part of Failure Recovery, the updates not seen by S+, but sent by S- are sent again to S+, to make the Inprocess Requests Invariant True. The suffix of srvSent of S- to be sent is calculated based on srvMaxWriteSeqNumReceived stored by S-, and subtracting it from srvHist of S-, which is the maximum writes sent by S-. *)
-FailureRecovery(server_state, server_history, server_sent, server_max_write_seq_num) ==
+FailureRecovery(server_state, server_history, server_sent, server_max_write_seq_num, temp_tail) ==
     [
         i \in 1..Len(server_state)
             |->
-                IF (i = 1 \/ i > Current_Tail)
+                IF (i = 1 \/ i > temp_tail)
                 THEN
                     server_state[i]
                 ELSE
@@ -180,7 +180,7 @@ FailureAndRecoveryStep ==
         /\ Current_Tail' = Current_Tail - Cardinality(indices_to_remove)
         /\ False_Tail' = False_Tail - Cardinality(indices_to_remove)
         /\ srvMaxWriteSeqNumReceived' = FailServer(srvMaxWriteSeqNumReceived, indices_to_remove)
-        /\ srvReqs' = FailureRecovery(FailServer(srvReqs, indices_to_remove), FailServer(srvHist, indices_to_remove),  FailServer(srvSent, indices_to_remove), FailServer(srvMaxWriteSeqNumReceived, indices_to_remove) )
+        /\ srvReqs' = FailureRecovery(FailServer(srvReqs, indices_to_remove), FailServer(srvHist, indices_to_remove),  FailServer(srvSent, indices_to_remove), FailServer(srvMaxWriteSeqNumReceived, indices_to_remove), Current_Tail - Cardinality(indices_to_remove) )
         /\ resps' = resps \o RemoveElementsfromSequence(FailServer(srvSent, indices_to_remove)[Current_Tail'], resps) \* Sending Writes to resps if Tail is removed
         /\ srvReplied' = FailServer(srvReplied, indices_to_remove)
 \*        /\ srvReplied' = SyncSrvRepliedReadsFromResps(FailServer(srvReplied, indices_to_remove), resps) \* Updating srvReplied reads in the new pre-tail server from resps(Needed for refinement mapping with SS)
@@ -202,23 +202,116 @@ ShiftCurrentTailToNewServer ==
     /\  STEP_TAKEN' = "ShiftCurrentTailToNewServer"
     /\  Current_Tail < Len(srvVals)
     /\  srvHist[Current_Tail] = srvHist[Current_Tail + 1] \o RemoveElementsfromSequence(srvSent[Current_Tail], srvHist[Current_Tail + 1]) \* Checking InProcess Requests Invariant which implies Tail can be shifted to new node.
-    /\ srvReqs' = [srvReqs EXCEPT ![Current_Tail + 1] = srvReqs[Current_Tail+1] \o (srvSent[Current_Tail] \o srvReqs[Current_Tail]) ]
-    /\ srvVals' = [srvVals EXCEPT ![Current_Tail + 1] = srvVals[Current_Tail]]
+
+    (* Applying elements of Sent from old Tail to new Tail, such that both srvHist of new and old Tail are same *)
+    /\ srvHist' = [srvHist EXCEPT ![Current_Tail+1] = srvHist[Current_Tail + 1] \o RemoveElementsfromSequence(srvSent[Current_Tail], srvHist[Current_Tail + 1]) ]
+    /\ srvSent' = srvSent
+(*    /\ srvSent' =   
+        [
+            s \in 1..False_Tail 
+            |-> 
+            IF 
+                s = Current_Tail 
+            THEN 
+                <<>> 
+            ELSE 
+                srvSent[s] 
+        ] 
+*)
+\* Since newly added servers cannot fail in this spec's assumption, no acknowledgements will be received for past writes, so srvSent can be empty on old Tail. srvSent is copied to srvReqs on New Tail.
+    
+    /\ srvReqs' = [srvReqs EXCEPT ![Current_Tail + 1] = srvSent[Current_Tail] ]
+
+    /\ srvReplied' = 
+        [
+            s \in 1..False_Tail 
+            |->
+            IF s = Current_Tail
+            THEN
+                [ 
+                    r |-> {}, \* Deleting read history from server which is not going to be TAIL in the next state
+                    w |-> srvReplied[s].w
+                ]
+            ELSE
+                IF s = Current_Tail + 1 \* New Tail in next state
+                THEN 
+                    [ 
+                        \* Syncing read history from old Tail to new Tail, can also be deleted, as history can be large, and does not affect data consistency of SS
+                        r |-> srvReplied[s-1].r, 
+                        
+                        \* New Tail aready has partial write history from old Tail sue to srvHist sync. The rest will be updated, when writes received from srvSent of old Tail will be applied
+                        w |-> srvReplied[s].w \union srvReplied[s-1].w
+                    ]
+
+                ELSE 
+                    srvReplied[s]
+        ]
+    
     /\ Current_Tail' = Current_Tail + 1
-     /\ UNCHANGED  <<reqs, resps, REMOVED_INDICES, False_Tail,srvAck, srvHist, srvMaxWriteSeqNumReceived, srvReplied, srvSent, srvVals >>
+    /\ UNCHANGED  <<reqs, resps, REMOVED_INDICES, False_Tail,srvAck, srvMaxWriteSeqNumReceived, srvVals >>
     
     
-SyncHistoryWithTailNeighbor ==
-    /\  STEP_TAKEN' = "SyncHistoryWithTailNeighbor"
-    /\  Current_Tail < Len(srvVals)
-    /\ srvHist[Current_Tail] # srvHist[Current_Tail + 1] \o RemoveElementsfromSequence(srvSent[Current_Tail], srvHist[Current_Tail + 1])
-    /\  IF Len(srvHist[Current_Tail+1]) < Len(srvHist[Current_Tail])
-        THEN 
-            /\  srvHist' = [srvHist EXCEPT ![Current_Tail+1] = Append(@, srvHist[Current_Tail][Len(srvHist[Current_Tail+1]) + 1])]
-            /\  srvMaxWriteSeqNumReceived' = [srvMaxWriteSeqNumReceived EXCEPT ![Current_Tail+1] = srvMaxWriteSeqNumReceived[Current_Tail+1] + 1 ]
-        ELSE 
-            FALSE
-    /\ UNCHANGED <<Current_Tail, False_Tail, REMOVED_INDICES, reqs, resps, srvAck, srvReplied, srvReqs, srvSent, srvVals>>
+SyncHistoryWithNewServer ==
+    /\  STEP_TAKEN' = "SyncHistoryWithNewServer"
+    /\  Current_Tail < False_Tail
+    /\ srvHist[Current_Tail] # srvHist[Current_Tail + 1] \o RemoveElementsfromSequence(srvSent[Current_Tail], srvHist[Current_Tail + 1]) \* Checking In process request invariant is till not TRUE, keep syncing History from Tail to new server.
+    /\  srvHist' = 
+        [
+            s   \in 1..False_Tail 
+            |-> 
+            IF  
+                /\ s > Current_Tail 
+                /\ Len(srvHist[s]) < Len(srvHist[s-1])
+            THEN 
+                Append(srvHist[s], srvHist[s-1][Len(srvHist[s]) + 1])
+            ELSE
+                srvHist[s]                        
+        ]
+    /\  srvMaxWriteSeqNumReceived' = 
+            [
+                s   \in 1..False_Tail 
+                |-> 
+                IF  
+                    /\ s > Current_Tail 
+                    /\ Len(srvHist[s]) < Len(srvHist[s-1])
+                THEN 
+                    srvMaxWriteSeqNumReceived[s] + 1
+                ELSE
+                    srvMaxWriteSeqNumReceived[s]                        
+            ]
+
+    /\  srvReplied' = 
+        [
+            s   \in 1..False_Tail 
+            |-> 
+            IF  
+                s > Current_Tail /\ Len(srvHist[s]) < Len(srvHist[s-1])
+            THEN 
+                [
+                    r |-> srvReplied[s].r, 
+                    w |-> 
+                        srvReplied[s].w 
+                        \union 
+                        { srvHist[s-1][Len(srvHist[s]) + 1].id }]
+            ELSE
+                srvReplied[s]                        
+        ]
+
+    /\  srvVals' = 
+            [
+                s   \in 1..False_Tail 
+                |-> 
+                IF  
+                    /\ s > Current_Tail 
+                    /\ Len(srvHist[s]) < Len(srvHist[s-1])
+                THEN 
+                    srvHist[s-1][Len(srvHist[s]) + 1].v
+                ELSE
+                    srvVals[s]                        
+            ]
+
+    
+    /\ UNCHANGED <<Current_Tail, False_Tail, REMOVED_INDICES, reqs, resps, srvAck, srvReqs, srvSent>>
     
 
 (* Modifying IssueRead step from CR as it used a constant TAIL, but due to failures, Current_Tail is used here which is updated on each failure*)
@@ -245,19 +338,53 @@ ModifiedCRServerWrites(op, s) ==
     /\ op.id \notin srvReplied[s].w
     /\ srvReplied' = [srvReplied EXCEPT ![s] = [@ EXCEPT !.w = @ \union {op.id}]]
     /\ srvHist' = [srvHist EXCEPT ![s] = Append(@, op)]
-    /\ srvSent' = [srvSent EXCEPT ![s] = Append(@, op)]
     /\ srvVals' = [srvVals EXCEPT ![s] = op.v]
     /\ \/ /\ s+1 > Current_Tail 
           /\ resps' = Append(resps, [id |-> op.id])
           /\ srvAck' = [srvAck EXCEPT ![s] = @ \union {op.id} ]
           /\ srvReqs' = srvReqs
+          /\ IF False_Tail > Current_Tail
+             THEN
+                \* Start adding updates to Sent in Tail when syncing with a new server
+                srvSent' = [srvSent EXCEPT ![s] = Append(@, op)]
+             ELSE 
+                srvSent' = srvSent
           /\ UNCHANGED <<srvMaxWriteSeqNumReceived>>
        \/ /\ s+1 <= Current_Tail
+          /\ srvSent' = [srvSent EXCEPT ![s] = Append(@, op)]
           /\ srvReqs' = [srvReqs  EXCEPT ![s+1] = Append(@, op)]
           /\ srvMaxWriteSeqNumReceived' = [srvMaxWriteSeqNumReceived  EXCEPT ![s+1] = srvMaxWriteSeqNumReceived[s+1] + 1 ]
           /\ resps' = resps
           /\ UNCHANGED <<srvAck>>
     /\ UNCHANGED <<reqs>>
+
+ModifiedCRServerReads(op, s) == 
+    /\  op.id \in RID
+    /\  op.id \notin srvReplied[s].r
+    /\  IF s = Current_Tail
+        THEN 
+            /\ srvReplied' = [srvReplied EXCEPT ![s] = [@ EXCEPT !.r = @ \union {op.id}]]
+            /\ resps' = Append(resps, [id |-> op.id, v |-> srvVals[s]])
+            /\ UNCHANGED <<srvVals, srvReqs, reqs>>
+        ELSE
+            /\ srvReqs' =  
+                [
+                    i \in 1..False_Tail
+                    |->
+                    IF 
+                        i = Current_Tail
+                    THEN
+                        Append(srvReqs[i], op) \* Sending read to Tail, if a non-Tail has reads in its srvReqs(from earlier time, when it was a TAIL itself)
+                    ELSE
+                        IF 
+                            i = s
+                        THEN
+                            Tail(srvReqs[i]) \* Removing read from current srvReqs, as this server is not a Tail and cannot service reads/queries
+                        ELSE 
+                            srvReqs[i]
+
+                ] 
+            /\ UNCHANGED <<srvVals, reqs, resps, srvReplied>>
 
 (* After Tail finishes a write, it adds that write to its local srvAck. This ack is back propagated back through the chain *)
 BackPropagateAck(s) ==
@@ -286,7 +413,8 @@ ModifiedCRNext ==
     \/ \E s \in (1..Current_Tail):
         /\ Len(srvReqs[s]) > 0
         /\ LET o == Head(srvReqs[s]) IN
-            \/ 
+
+(*            \/ 
                 /\ DropRead(o, s)
                 /\ STEP_TAKEN' = "DropRead"
                 /\ REMOVED_INDICES' = {}
@@ -296,9 +424,10 @@ ModifiedCRNext ==
                 /\ STEP_TAKEN' = "DropWrite"
                 /\ REMOVED_INDICES' = {}
                 /\ UNCHANGED <<srvAck, srvHist, srvSent, srvMaxWriteSeqNumReceived, Current_Tail, False_Tail>>
+*)
             \/ 
-                /\ ServerReads(o, s)
-                /\ STEP_TAKEN' = "ServerReads"
+                /\ ModifiedCRServerReads(o, s)
+                /\ STEP_TAKEN' = "ModifiedCRServerReads"
                 /\ REMOVED_INDICES' = {}
                 /\ UNCHANGED <<srvAck, srvHist, srvSent, srvMaxWriteSeqNumReceived, Current_Tail, False_Tail>>
             \/ 
@@ -328,7 +457,7 @@ AddFailStopCRNext ==
         \/  ModifiedCRNext
         \/  \E num_servers \in {1,2}:
                 AddNewServertoChain(num_servers)
-        \/  SyncHistoryWithTailNeighbor
+        \/  SyncHistoryWithNewServer
         \/  ShiftCurrentTailToNewServer
 
 vars == <<srvReplied, srvVals, srvReqs, resps, reqs, STEPS, Current_Tail, REMOVED_INDICES, srvHist, srvSent, srvAck, srvHist, STEP_TAKEN, srvMaxWriteSeqNumReceived, False_Tail>>   
@@ -343,7 +472,7 @@ AddFailStopLiveness ==
 AddFailStopCRSpec == 
     /\ AddFailStopCRInit 
     /\ [][AddFailStopCRNext]_vars 
-\*    /\ FailStopFairness 
-\*    /\ FailStopLiveness
+    /\ AddFailStopFairness 
+    /\ AddFailStopLiveness
 
 =============================================================================
