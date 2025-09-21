@@ -30,3 +30,15 @@ The following steps are allowed:
     - UpdateSentFromAck : If an Ack for a write in the head of Sent list is found, that write is removed from Sent, which implies that Tail has seen this Write.
 
 - FailureAndRecoveryStep : For all possible sets of servers in the chain, assuming atleast one server is always live, one or more servers are failed in the chain, and its neighbors are synced after deletion in a single step.
+
+
+Following major safety invariants are used:
+
+- UpdatePropagationSafety : Ensures that for all (non-new)servers, their history sequence(`srvHist`) is a prefix for all its predecessor histories
+- InprocessRequestsSafety : Ensures that for all (non-new)servers i,j in the chain, where `i<=j`, `srvHist[i] = srvHist[j] + Sent[i]` (Here + represents combining two sequences where no duplicates are present and total order among updates are maintained)
+
+
+Following Liveness properties are used:
+
+- AddFailStopLiveness : For all requests in `reqs`, it always happens that the request is eventually found in `resps`
+- EventuallySyncwithNewServers : It always happens that eventually Current_Tail and False_Tail will be equal. On addition of new servers, Current_Tail and False_Tail becomes unequal, they should eventually be equal implying that new servers and eventually synced with the Tail, and Tail is moved to the new server.
