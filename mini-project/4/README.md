@@ -7,9 +7,9 @@ Following mapping is used for SS variables
 
 - reqs(SS) : mapped to reqs in AddFailStopCR.tla
 
-- resps(SS) : mapped to resps in AddFailStop.tla
+- resps(SS) : mapped to resps in AddFailStopCR.tla
 
-- accepted(SS) : mapped to srvReplied[Current_Tail] in Failstop.tla, which is the read and write history maintained by the Tail in CR.
+- accepted(SS) : mapped to srvReplied[Current_Tail] in AddFailstop.tla, which is the read and write history maintained by the Tail in CR.
 
 - val(SS) : mapped to the following. Instead of `srvVals`, the last element of `srvHist` of `Current_Tail` is used if Tail has seen at least one write. Else, the initial value is used.  
 ```

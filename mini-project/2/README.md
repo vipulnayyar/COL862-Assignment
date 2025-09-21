@@ -5,7 +5,7 @@ Following mapping is used for SS variables
 
 - reqs(SS) : mapped to reqs in FailStopCR.tla
 
-- resps(SS) : mapped to resps in FailStop.tla
+- resps(SS) : mapped to resps in FailStopCR.tla
 
 - val(SS) : mapped to srvVals[Current_Tail] in FailStop.tla, which is the value of server state maintained by the Tail in CR.
 
