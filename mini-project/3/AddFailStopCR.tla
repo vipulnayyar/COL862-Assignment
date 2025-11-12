@@ -234,7 +234,7 @@ ShiftCurrentTailToNewServer ==
                         \* Syncing read history from old Tail to new Tail, can also be deleted, as history can be large, and does not affect data consistency of SS
                         r |-> srvReplied[s-1].r, 
                         
-                        \* New Tail aready has partial write history from old Tail sue to srvHist sync. The rest will be updated, when writes received from srvSent of old Tail will be applied
+                        \* New Tail aready has partial write history from old Tail due to srvHist sync. The rest will be updated, when writes received from srvSent of old Tail will be applied
                         w |-> srvReplied[s].w \union srvReplied[s-1].w
                     ]
 
@@ -250,7 +250,7 @@ ShiftCurrentTailToNewServer ==
             THEN
                 srvSent[Current_Tail][Len(srvSent[Current_Tail])].v 
             ELSE
-            srvVals[Current_Tail+1]
+                srvVals[Current_Tail+1]
         ]
 
 
@@ -420,16 +420,17 @@ ModifiedCRNext ==
         /\ Len(srvReqs[s]) > 0
         /\ LET o == Head(srvReqs[s]) IN
 
-(*            \/ 
+(* Commenting for Machine checkability under 1 minute
+            \/ 
                 /\ DropRead(o, s)
                 /\ STEP_TAKEN' = "DropRead"
                 /\ REMOVED_INDICES' = {}
-                /\ UNCHANGED <<srvAck, srvHist, srvSent, srvMaxWriteSeqNumReceived, Current_Tail, False_Tail>>
+                /\ UNCHANGED <<srvAck, srvHist, srvSent, srvMaxWriteSeqNumReceived, Current_Tail, False_Tail, NUM_SERVERS_ADDED, NUM_SERVERS_DELETED>>
             \/ 
                 /\ DropWrite(o, s)
                 /\ STEP_TAKEN' = "DropWrite"
                 /\ REMOVED_INDICES' = {}
-                /\ UNCHANGED <<srvAck, srvHist, srvSent, srvMaxWriteSeqNumReceived, Current_Tail, False_Tail>>
+                /\ UNCHANGED <<srvAck, srvHist, srvSent, srvMaxWriteSeqNumReceived, Current_Tail, False_Tail, NUM_SERVERS_ADDED, NUM_SERVERS_DELETED>>
 *)
             \/ 
                 /\ ModifiedCRServerReads(o, s)

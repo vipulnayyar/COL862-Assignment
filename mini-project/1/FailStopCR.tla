@@ -82,6 +82,8 @@ FailureRecovery(server_state, server_history, server_sent, server_max_write_seq_
 
                         PreviousSequenceCount == Len(server_history[i-1])
 
+                        (*** Writing to server_history implies it is also sent to next server in chain, this step ensures that all sent requests from prev server is finally present in next srvReqs *)
+
                         \*PreviousSequenceCount == server_max_write_seq_num[i-1]
                         
                         LengthofPrevSentToTransfer == PreviousSequenceCount - CurrentSequenceCount
